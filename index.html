@@ -26,20 +26,22 @@
     </div>
   </header>
 
-  <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>(가상 엔진 런업)입니다. 실제 시험 결과가 아닙니다.</div>
+  <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>(가상 값)입니다. 실제 시험 결과가 아닙니다.</div>
 
   <main id="main" class="inner main" tabindex="-1">
     <section id="step-import" class="card">
       <h2>1. 데이터 불러오기</h2>
-      <p>Testlab Neo 에서 내보낸 주파수축 CSV 파일을 고릅니다. 파일은 이 브라우저 안에서만 읽고 어디로도 보내지 않습니다.</p>
+      <p>Testlab Neo 에서 내보낸 주파수축 CSV 파일을 고릅니다. 「Curve 1」 제목과 Standard\All\… 머리 정보가 붙은 내보내기는 그대로 알아봅니다. 파일은 이 브라우저 안에서만 읽고 어디로도 보내지 않습니다.</p>
       <div class="import-row">
         <label class="file-pick">
           <span class="sr">CSV 파일 선택</span>
           <input type="file" id="fileInput" accept=".csv,.txt,text/csv,text/plain">
         </label>
         <button type="button" class="btn" id="sampleBtn">예시 데이터 불러오기</button>
+        <button type="button" class="btn" id="sampleTlBtn">Testlab 형식 예시 불러오기</button>
       </div>
       <p class="note">예시 파일 내려받기(모두 가상 데이터):
+        <a href="samples/예시데이터_TestlabNeo형식.csv" download>Testlab Neo 형식</a> ·
         <a href="samples/예시데이터_세로형.csv" download>세로형</a> ·
         <a href="samples/예시데이터_가로형.csv" download>가로형</a> ·
         <a href="samples/예시데이터_가로형_열RPM.csv" download>가로형(열=RPM)</a>
@@ -49,7 +51,7 @@
 
     <section id="step-map" class="card" hidden>
       <h2>2. 열 맞추기</h2>
-      <p class="note">실제 Testlab Neo 내보내기의 열 배치가 아직 확인되지 않아, 파일에 맞게 고를 수 있게 했습니다. 처음에는 열 제목을 보고 짐작해 채워 두며, 마지막 설정은 이 브라우저에 기억합니다.</p>
+      <p class="note">Testlab Neo 내보내기는 머리 정보(Dataset name·DOF id·Y axis unit)에서 RPM·위치·방향·단위를 읽으므로 열을 지정할 필요가 없습니다. 다른 모양의 CSV 는 배치와 열을 골라 주세요. 마지막 설정은 이 브라우저에 기억합니다.</p>
       <div class="form-grid cols-4">
         <label class="field"><span>구분자</span>
           <select id="delimiter">
@@ -67,7 +69,7 @@
         </label>
       </div>
       <div id="mapFields" class="form-grid cols-3 map-fields"></div>
-      <h3 class="preview-title">미리 보기 (머리행부터 6줄)</h3>
+      <h3 class="preview-title" id="previewTitle">미리 보기 (머리행부터 6줄)</h3>
       <div class="table-wrap"><table class="list preview" id="preview"></table></div>
       <div class="submit-bar">
         <button type="button" class="btn btn-primary btn-big" id="applyMapBtn">이 설정으로 분석하기</button>
@@ -77,17 +79,37 @@
     <section id="step-settings" class="card" hidden>
       <h2>3. 분석 설정</h2>
       <form id="settingsForm" class="form-grid cols-3">
+        <h3 class="span-all form-sub">오더 추적</h3>
         <label class="field"><span>추적할 오더 (쉼표로 구분)</span><input name="orders" inputmode="decimal"></label>
-        <label class="field"><span>오더 대역 반폭(±)</span><input name="halfWidth" type="number" step="any" min="0"></label>
-        <label class="field"><span>대역 값 읽는 방식</span>
+        <label class="field"><span>오더 진폭 계산 방식</span>
           <select name="trackMethod">
-            <option value="max">대역 최대값</option>
-            <option value="rss">대역 에너지(제곱합의 제곱근)</option>
+            <option value="peak">피크 검색 → 피크 ± 합산 범위 RSS (제출자 분석기 v34)</option>
+            <option value="max">오더 대역(±오더) 최대값</option>
+            <option value="rss">오더 대역(±오더) RSS</option>
           </select>
         </label>
         <label class="field"><span>기준축 회전비(기어비)</span><input name="ratio" type="number" step="any" min="0"></label>
+        <label class="field"><span>피크 검색 범위 (±Hz)</span><input name="searchHz" type="number" step="any" min="0"></label>
+        <label class="field"><span>피크 중심 합산 범위 (±Hz)</span><input name="sumHz" type="number" step="any" min="0"></label>
+        <label class="field"><span>오더 대역 반폭(±오더) — 대역 방식만</span><input name="halfWidth" type="number" step="any" min="0"></label>
+        <p class="note span-all">이론 주파수 = 오더 × RPM × 회전비 ÷ 60. 그 주파수 ± 검색 범위에서 가장 큰 칸을 피크로 잡고, 피크 ± 합산 범위 칸들의 제곱합의 제곱근을 오더 진폭으로 씁니다(범위 0 = 가장 가까운 칸 하나). 오더를 두 개 이상 적으면 같은 RPM 의 오더 진폭을 RSS 로 합산한 선도 그립니다.</p>
+
+        <h3 class="span-all form-sub">진폭 표시 (소음 · 진동)</h3>
+        <label class="field"><span>소음 표시 단위</span>
+          <select name="noiseMode"><option value="linear">Amplitude (Pa)</option><option value="db">dB</option><option value="dba">dBA</option></select>
+        </label>
+        <label class="field"><span>소음 dB 기준값 (Pa)</span><input name="noiseRef" type="number" step="any" min="0"></label>
+        <label class="field"><span>소음 원본 dB → Pa 기준값</span><input name="noiseSrcRef" type="number" step="any" min="0"></label>
+        <label class="field"><span>진동 표시 단위</span>
+          <select name="vibMode"><option value="linear">Amplitude (g 등)</option><option value="db">dB</option><option value="dba">dBA</option></select>
+        </label>
+        <label class="field"><span>진동 dB 기준값</span><input name="vibRef" type="number" step="any" min="0"></label>
+        <label class="field"><span>진동 원본 dB → 선형 기준값</span><input name="vibSrcRef" type="number" step="any" min="0"></label>
+        <p class="note span-all">원본이 dB 인 채널(예: 마이크 Pa 채널의 「dB」 척도)은 원본 기준값으로 선형 진폭으로 되돌린 뒤 계산합니다. 기본값은 소음 20 µPa(2e-5 Pa), 진동 1 µm/s²(1.0197e-7 g)입니다. dBA 는 검출 피크 주파수에서 A-가중을 더합니다.</p>
+
+        <h3 class="span-all form-sub">피크 · 에너지 합산</h3>
         <label class="field"><span>RPM 별 피크 개수</span><input name="peakTopN" type="number" step="1" min="0"></label>
-        <label class="field"><span>피크 최소 진폭(이하 제외)</span><input name="peakMin" type="number" step="any" min="0"></label>
+        <label class="field"><span>피크 최소 진폭(선형, 이하 제외)</span><input name="peakMin" type="number" step="any" min="0"></label>
         <label class="field"><span>에너지 합산 대역 기준</span>
           <select name="energyAxis">
             <option value="hz">주파수(Hz)</option>
@@ -96,7 +118,7 @@
         </label>
         <label class="field"><span>대역 시작 (빈칸 = 처음부터)</span><input name="energyLo" inputmode="decimal"></label>
         <label class="field"><span>대역 끝 (빈칸 = 끝까지)</span><input name="energyHi" inputmode="decimal"></label>
-        <p class="note span-all">오더 = 주파수(Hz) × 60 ÷ (RPM × 회전비). 대역 반폭·합산 방식·피크 기준은 제출자 기준을 받기 전의 임시값이며 언제든 바꿀 수 있습니다.</p>
+        <p class="note span-all">피크 목록과 대역 에너지 합산은 제출자 분석기에는 없고 이 도구가 더한 것입니다. 값은 선형 진폭(소음은 Pa)입니다.</p>
         <div class="submit-bar span-all">
           <button type="button" class="btn" id="resetSettingsBtn">처음 값으로</button>
           <button type="submit" class="btn btn-primary btn-big">다시 계산</button>
@@ -113,6 +135,7 @@
         <div id="summary" class="summary"></div>
         <div class="btn-row save-row">
           <button type="button" class="btn" data-save="track">오더 추적 CSV</button>
+          <button type="button" class="btn" data-save="rss">오더 RSS 합산 CSV</button>
           <button type="button" class="btn" data-save="ordermax">오더별 최대 CSV</button>
           <button type="button" class="btn" data-save="peaks">피크 목록 CSV</button>
           <button type="button" class="btn" data-save="energy">에너지 합산 CSV</button>
@@ -128,6 +151,11 @@
           <div class="tip" id="lineTip" hidden></div>
         </div>
         <div class="legend" id="lineLegend"></div>
+        <p class="note">속이 빈 빨간 점은 「불일치」(이론 주파수가 측정 범위 밖)입니다. 점선은 오더 RSS 합산입니다.</p>
+        <details class="overlay-box">
+          <summary>다른 채널도 겹쳐 보기</summary>
+          <div id="overlayGroups" class="overlay-list"></div>
+        </details>
       </div>
 
       <div class="card">
@@ -137,14 +165,21 @@
             <button type="button" class="btn" id="axisHz" aria-pressed="true">주파수 축</button>
             <button type="button" class="btn" id="axisOrder" aria-pressed="false">오더 축</button>
             <label class="check-inline"><input type="checkbox" id="showPeaks" checked> 피크 표시</label>
+            <label class="check-inline"><input type="checkbox" id="showOrders" checked> 오더 선 표시</label>
           </div>
+        </div>
+        <div class="form-grid cols-4 map-range">
+          <label class="field"><span id="mapLoLabel">가로축 최소 (Hz)</span><input id="mapLo" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span id="mapHiLabel">가로축 최대 (Hz)</span><input id="mapHi" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span>색 범위 최소</span><input id="mapCMin" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span>색 범위 최대</span><input id="mapCMax" type="number" step="any" placeholder="자동"></label>
         </div>
         <div class="chart-wrap" id="mapWrap">
           <canvas id="colorMap" class="chart" aria-label="RPM × 주파수 스펙트럼 컬러맵"></canvas>
           <div class="tip" id="mapTip" hidden></div>
         </div>
         <div class="scale" id="mapScale"></div>
-        <p class="note">마우스를 올리거나 눌러 보면 RPM·주파수·오더·진폭이 나옵니다. 흰 동그라미가 RPM 별 피크입니다.</p>
+        <p class="note">마우스를 올리거나 눌러 보면 RPM·주파수·오더·진폭이 나오고, 오더 선 가까이에서는 그 오더의 검출 피크가 나옵니다. 흰 동그라미가 RPM 별 피크, 점선이 추적 오더입니다. 빈칸은 자동 범위입니다.</p>
       </div>
 
       <div class="card">
@@ -163,7 +198,7 @@
   </main>
 
   <footer class="site-footer">
-    <div class="inner">1단계 · 데이터는 이 브라우저 안에서만 처리합니다 · 제출자 초안 HTML과 맞춰 볼 예정입니다</div>
+    <div class="inner">1단계 · 데이터는 이 브라우저 안에서만 처리합니다 · 오더 계산은 제출자 분석기 v34 와 같은 식입니다</div>
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
