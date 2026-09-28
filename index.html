@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>소음진동 오더 분석 도구</title>
+  <meta name="description" content="Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 변환·오더 추적·피크 추출·에너지 합산, 오더별 RPM-진폭 그래프와 스펙트럼 컬러맵, 결과 CSV·경고 로그 저장까지 브라우저 안에서 처리하는 도구(1단계)">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="inner header-inner">
+      <div class="brand">
+        <span class="brand-name">소음진동 오더 분석 도구</span>
+        <span class="brand-sub">주파수축 CSV → 오더 추적 · 피크 · 에너지 합산 · 컬러맵</span>
+      </div>
+      <nav class="nav" aria-label="바로 가기">
+        <a href="#step-import">1. 불러오기</a>
+        <a href="#step-map">2. 열 맞추기</a>
+        <a href="#step-settings">3. 분석 설정</a>
+        <a href="#step-results">4. 결과</a>
+        <a href="#step-log">경고 로그</a>
+      </nav>
+    </div>
+  </header>
+
+  <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>(가상 엔진 런업)입니다. 실제 시험 결과가 아닙니다.</div>
+
+  <main id="main" class="inner main" tabindex="-1">
+    <section id="step-import" class="card">
+      <h2>1. 데이터 불러오기</h2>
+      <p>Testlab Neo 에서 내보낸 주파수축 CSV 파일을 고릅니다. 파일은 이 브라우저 안에서만 읽고 어디로도 보내지 않습니다.</p>
+      <div class="import-row">
+        <label class="file-pick">
+          <span class="sr">CSV 파일 선택</span>
+          <input type="file" id="fileInput" accept=".csv,.txt,text/csv,text/plain">
+        </label>
+        <button type="button" class="btn" id="sampleBtn">예시 데이터 불러오기</button>
+      </div>
+      <p class="note">예시 파일 내려받기(모두 가상 데이터):
+        <a href="samples/예시데이터_세로형.csv" download>세로형</a> ·
+        <a href="samples/예시데이터_가로형.csv" download>가로형</a> ·
+        <a href="samples/예시데이터_가로형_열RPM.csv" download>가로형(열=RPM)</a>
+      </p>
+      <p id="fileInfo" class="file-info" hidden></p>
+    </section>
+
+    <section id="step-map" class="card" hidden>
+      <h2>2. 열 맞추기</h2>
+      <p class="note">실제 Testlab Neo 내보내기의 열 배치가 아직 확인되지 않아, 파일에 맞게 고를 수 있게 했습니다. 처음에는 열 제목을 보고 짐작해 채워 두며, 마지막 설정은 이 브라우저에 기억합니다.</p>
+      <div class="form-grid cols-4">
+        <label class="field"><span>구분자</span>
+          <select id="delimiter">
+            <option value=",">쉼표(,)</option>
+            <option value=";">세미콜론(;)</option>
+            <option value="&#9;">탭</option>
+          </select>
+        </label>
+        <label class="field"><span>머리행(열 제목) 줄 번호</span>
+          <input type="number" id="headerRow" min="1" step="1">
+        </label>
+        <label class="field check"><input type="checkbox" id="decimalComma"> <span>소수점이 쉼표(1,25)</span></label>
+        <label class="field span-2"><span>배치</span>
+          <select id="layout"></select>
+        </label>
+      </div>
+      <div id="mapFields" class="form-grid cols-3 map-fields"></div>
+      <h3 class="preview-title">미리 보기 (머리행부터 6줄)</h3>
+      <div class="table-wrap"><table class="list preview" id="preview"></table></div>
+      <div class="submit-bar">
+        <button type="button" class="btn btn-primary btn-big" id="applyMapBtn">이 설정으로 분석하기</button>
+      </div>
+    </section>
+
+    <section id="step-settings" class="card" hidden>
+      <h2>3. 분석 설정</h2>
+      <form id="settingsForm" class="form-grid cols-3">
+        <label class="field"><span>추적할 오더 (쉼표로 구분)</span><input name="orders" inputmode="decimal"></label>
+        <label class="field"><span>오더 대역 반폭(±)</span><input name="halfWidth" type="number" step="any" min="0"></label>
+        <label class="field"><span>대역 값 읽는 방식</span>
+          <select name="trackMethod">
+            <option value="max">대역 최대값</option>
+            <option value="rss">대역 에너지(제곱합의 제곱근)</option>
+          </select>
+        </label>
+        <label class="field"><span>기준축 회전비(기어비)</span><input name="ratio" type="number" step="any" min="0"></label>
+        <label class="field"><span>RPM 별 피크 개수</span><input name="peakTopN" type="number" step="1" min="0"></label>
+        <label class="field"><span>피크 최소 진폭(이하 제외)</span><input name="peakMin" type="number" step="any" min="0"></label>
+        <label class="field"><span>에너지 합산 대역 기준</span>
+          <select name="energyAxis">
+            <option value="hz">주파수(Hz)</option>
+            <option value="order">오더</option>
+          </select>
+        </label>
+        <label class="field"><span>대역 시작 (빈칸 = 처음부터)</span><input name="energyLo" inputmode="decimal"></label>
+        <label class="field"><span>대역 끝 (빈칸 = 끝까지)</span><input name="energyHi" inputmode="decimal"></label>
+        <p class="note span-all">오더 = 주파수(Hz) × 60 ÷ (RPM × 회전비). 대역 반폭·합산 방식·피크 기준은 제출자 기준을 받기 전의 임시값이며 언제든 바꿀 수 있습니다.</p>
+        <div class="submit-bar span-all">
+          <button type="button" class="btn" id="resetSettingsBtn">처음 값으로</button>
+          <button type="submit" class="btn btn-primary btn-big">다시 계산</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="step-results" hidden>
+      <div class="card">
+        <div class="page-head">
+          <h2>4. 결과</h2>
+          <label class="field inline"><span>채널 · 방향</span><select id="groupSelect"></select></label>
+        </div>
+        <div id="summary" class="summary"></div>
+        <div class="btn-row save-row">
+          <button type="button" class="btn" data-save="track">오더 추적 CSV</button>
+          <button type="button" class="btn" data-save="ordermax">오더별 최대 CSV</button>
+          <button type="button" class="btn" data-save="peaks">피크 목록 CSV</button>
+          <button type="button" class="btn" data-save="energy">에너지 합산 CSV</button>
+          <button type="button" class="btn" data-save="log">경고 로그 CSV</button>
+        </div>
+        <p class="note">CSV 는 모든 채널·방향을 담습니다. 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM)으로 저장합니다.</p>
+      </div>
+
+      <div class="card">
+        <h3>오더별 RPM-진폭 그래프</h3>
+        <div class="chart-wrap" id="lineWrap">
+          <svg id="lineChart" class="chart" role="img" aria-label="오더별 RPM-진폭 그래프"></svg>
+          <div class="tip" id="lineTip" hidden></div>
+        </div>
+        <div class="legend" id="lineLegend"></div>
+      </div>
+
+      <div class="card">
+        <div class="page-head">
+          <h3>스펙트럼 컬러맵</h3>
+          <div class="btn-row">
+            <button type="button" class="btn" id="axisHz" aria-pressed="true">주파수 축</button>
+            <button type="button" class="btn" id="axisOrder" aria-pressed="false">오더 축</button>
+            <label class="check-inline"><input type="checkbox" id="showPeaks" checked> 피크 표시</label>
+          </div>
+        </div>
+        <div class="chart-wrap" id="mapWrap">
+          <canvas id="colorMap" class="chart" aria-label="RPM × 주파수 스펙트럼 컬러맵"></canvas>
+          <div class="tip" id="mapTip" hidden></div>
+        </div>
+        <div class="scale" id="mapScale"></div>
+        <p class="note">마우스를 올리거나 눌러 보면 RPM·주파수·오더·진폭이 나옵니다. 흰 동그라미가 RPM 별 피크입니다.</p>
+      </div>
+
+      <div class="card">
+        <h3>오더별 최대</h3>
+        <div class="table-wrap"><table class="list" id="orderMaxTable"></table></div>
+        <h3 class="mt">RPM 별 피크 · 에너지 합산</h3>
+        <div class="table-wrap tall"><table class="list" id="peakTable"></table></div>
+      </div>
+    </section>
+
+    <section id="step-log" class="card">
+      <h2>경고 로그</h2>
+      <div id="logSummary" class="note">아직 불러온 파일이 없습니다.</div>
+      <div class="table-wrap tall"><table class="list" id="logTable"></table></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="inner">1단계 · 데이터는 이 브라우저 안에서만 처리합니다 · 제출자 초안 HTML과 맞춰 볼 예정입니다</div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- 로컬 파일(file://)로 열어도 돌도록 module 이 아닌 일반 스크립트로 불러옵니다 -->
+  <script src="js/logic.js"></script>
+  <script src="js/sample-data.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
