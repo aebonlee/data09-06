@@ -19,8 +19,9 @@
     cfg: null,          // 가져오기 설정
     importLog: [], groups: [], results: [], analysisLog: [],
     settings: Object.assign({}, L.DEFAULT_SETTINGS, savedSettings()),
-    groupIdx: 0, mapAxis: 'hz', extra: {}
+    groupIdx: 0, mapAxis: 'hz', extra: {}, files: []
   };
+  var view = S.getView();   // 화면 설정: lineH·mapH(그래프 높이 px), live(즉시 다시 계산)
 
   // ── 도우미 ──
   function h(tag, attrs) {
@@ -98,25 +99,69 @@
   }
   function reparse() { state.rows = L.parseCsv(state.text, state.cfg.delimiter); }
 
-  $('fileInput').addEventListener('change', function (e) {
-    var f = e.target.files && e.target.files[0];
-    if (!f) return;
+  // 파일 하나를 글자로 읽기. UTF-8 로 읽어 깨진 글자가 많으면 CP949(EUC-KR)로 다시 읽습니다(엑셀 저장 CSV 대비)
+  function readFile(f, done) {
     var rd = new FileReader();
     rd.onload = function () {
       var txt = String(rd.result || '');
-      // UTF-8 로 읽어 깨진 글자가 많으면 CP949(EUC-KR)로 다시 읽습니다(엑셀 저장 CSV 대비)
-      if ((txt.match(/�/g) || []).length > 3) {
+      if ((txt.match(/\uFFFD/g) || []).length > 3) {
         var rd2 = new FileReader();
-        rd2.onload = function () { loadText(String(rd2.result || ''), f.name, false); };
+        rd2.onload = function () { done(String(rd2.result || '')); };
+        rd2.onerror = function () { done(txt); };
         try { rd2.readAsText(f, 'euc-kr'); return; } catch (err) { /* 그대로 진행 */ }
       }
-      loadText(txt, f.name, false);
+      done(txt);
     };
-    rd.onerror = function () { toast('파일을 읽지 못했습니다', true); };
+    rd.onerror = function () { done(null); };
     rd.readAsText(f, 'utf-8');
+  }
+  // 여러 파일(파일 선택·끌어 놓기 공용): CSV·TXT 만 읽어 「불러온 파일」 목록에 두고 첫 파일을 엽니다
+  function openFiles(list) {
+    var files = Array.prototype.slice.call(list || []);
+    var ok = files.filter(function (f) { return /\.(csv|txt)$/i.test(f.name); });
+    if (files.length && !ok.length) { toast('CSV 파일(.csv·.txt)만 읽을 수 있습니다', true); return; }
+    if (!ok.length) return;
+    if (ok.length < files.length) toast('CSV 가 아닌 파일 ' + (files.length - ok.length) + '개는 뺐습니다', true);
+    var out = new Array(ok.length), left = ok.length;
+    ok.forEach(function (f, i) {
+      readFile(f, function (txt) {
+        out[i] = txt == null ? null : { name: f.name, text: txt };
+        if (--left) return;
+        var got = out.filter(Boolean);
+        if (got.length < out.length) toast('읽지 못한 파일이 ' + (out.length - got.length) + '개 있습니다', true);
+        if (!got.length) return;
+        state.files = got;
+        renderFileList(0);
+        loadText(got[0].text, got[0].name, false);
+      });
+    });
+  }
+  function renderFileList(sel) {
+    var wrap = $('fileListWrap'), s = $('fileList');
+    s.textContent = '';
+    (state.files || []).forEach(function (f, i) { s.appendChild(h('option', { value: String(i) }, (i + 1) + '. ' + f.name)); });
+    s.value = String(sel || 0);
+    wrap.hidden = !(state.files && state.files.length > 1);
+  }
+  $('fileList').addEventListener('change', function () {
+    var f = state.files[parseInt($('fileList').value, 10) || 0];
+    if (f) loadText(f.text, f.name, false);
   });
-  $('sampleBtn').addEventListener('click', function () { loadText(Sample.longCsv(), '예시데이터_세로형.csv', true); });
-  $('sampleTlBtn').addEventListener('click', function () { loadText(Sample.testlabCsv(), '예시데이터_TestlabNeo형식.csv', true); });
+  $('fileInput').addEventListener('change', function (e) { openFiles(e.target.files); e.target.value = ''; });
+
+  // 끌어 놓기 — 화면 어디에 놓아도 받습니다(놓친 파일을 브라우저가 열어 버리지 않게)
+  var dragDepth = 0;
+  function hasFiles(e) { var t = e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0; }
+  document.addEventListener('dragenter', function (e) { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+  document.addEventListener('dragover', function (e) { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  document.addEventListener('dragleave', function (e) { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+    openFiles(e.dataTransfer.files);
+  });
+  $('sampleBtn').addEventListener('click', function () { state.files = []; renderFileList(0); loadText(Sample.longCsv(), '예시데이터_세로형.csv', true); });
+  $('sampleTlBtn').addEventListener('click', function () { state.files = []; renderFileList(0); loadText(Sample.testlabCsv(), '예시데이터_TestlabNeo형식.csv', true); });
 
   // ── 2. 열 맞추기 ──
   var layoutSel = $('layout');
@@ -247,6 +292,10 @@
     });
     $('step-settings').hidden = false;
     $('step-results').hidden = false;
+    var cells = L.cellCount(res.groups);
+    $('liveCalc').checked = view.live !== false && cells <= L.LIVE_CELL_LIMIT;
+    $('liveStatus').textContent = view.live !== false && cells > L.LIVE_CELL_LIMIT ? '파일이 커서(칸 ' + cells.toLocaleString('ko-KR') + '개) 즉시 다시 계산을 껐습니다 — 켜려면 체크하세요' : '';
+    resetRanges();
     fillSettings();
     analyze();
     toast(res.groups.length + '개 채널·방향, 경고 ' + res.log.filter(function (x) { return x.level !== '정보'; }).length + '건');
@@ -257,24 +306,55 @@
   function fillSettings() {
     Object.keys(L.DEFAULT_SETTINGS).forEach(function (k) { if (sf.elements[k]) sf.elements[k].value = state.settings[k]; });
   }
-  function readSettings() {
+  function formSettings() {
     var s = {};
     Object.keys(L.DEFAULT_SETTINGS).forEach(function (k) { if (sf.elements[k]) s[k] = sf.elements[k].value; });
-    if (!L.parseOrders(s.orders).length) { toast('추적할 오더를 하나 이상 적어 주세요 (예: 1, 2)', true); return null; }
-    if (s.trackMethod !== 'peak' && !(Number(s.halfWidth) > 0)) { toast('오더 대역 반폭은 0보다 커야 합니다', true); return null; }
-    if (!(Number(s.ratio) > 0)) { toast('회전비는 0보다 커야 합니다', true); return null; }
-    if (!(s.searchHz !== '' && Number(s.searchHz) >= 0) || !(s.sumHz !== '' && Number(s.sumHz) >= 0)) { toast('피크 검색·합산 범위는 0 이상이어야 합니다', true); return null; }
-    if (!['noiseRef', 'noiseSrcRef', 'vibRef', 'vibSrcRef'].every(function (k) { return Number(s[k]) > 0; })) { toast('dB 기준값은 0보다 커야 합니다', true); return null; }
+    return s;
+  }
+  function readSettings() {
+    var s = formSettings(), err = L.validateSettings(s);
+    if (err) { toast(err, true); return null; }
     return s;
   }
   sf.addEventListener('submit', function (e) {
     e.preventDefault();
+    clearTimeout(liveTimer);
     var s = readSettings(); if (!s) return;
-    state.settings = s; S.setSettings(s); analyze(); toast('다시 계산했습니다');
+    state.settings = s; S.setSettings(s); analyze(); $('liveStatus').textContent = ''; toast('다시 계산했습니다');
   });
   $('resetSettingsBtn').addEventListener('click', function () {
-    state.settings = Object.assign({}, L.DEFAULT_SETTINGS); S.setSettings(state.settings); fillSettings(); analyze();
+    clearTimeout(liveTimer);
+    state.settings = Object.assign({}, L.DEFAULT_SETTINGS); S.setSettings(state.settings); fillSettings(); analyze(); $('liveStatus').textContent = '';
   });
+
+  // 즉시 다시 계산 — 칸을 바꾸고 0.3초 동안 더 바꾸지 않으면 계산합니다. 틀린 값이면 계산하지 않고 이유만 보여 줍니다.
+  // 큰 파일(칸 수가 L.LIVE_CELL_LIMIT 초과)이거나 한 번 계산이 1초를 넘으면 스스로 꺼집니다(「다시 계산」 버튼은 그대로).
+  var liveTimer, LIVE_DELAY = 300, LIVE_SLOW_MS = 1000;
+  $('liveCalc').checked = view.live !== false;
+  $('liveCalc').addEventListener('change', function () {
+    view.live = $('liveCalc').checked; S.setView({ live: view.live });
+    $('liveStatus').textContent = view.live ? '설정을 바꾸면 0.3초 뒤 다시 계산합니다' : '「다시 계산」을 눌러야 계산합니다';
+  });
+  function liveRecalc() {
+    if (!$('liveCalc').checked || !state.groups.length) return;
+    var s = formSettings(), err = L.validateSettings(s);
+    if (err) { $('liveStatus').textContent = '계산하지 않음 — ' + err; return; }
+    var t0 = Date.now();
+    state.settings = s; S.setSettings(s); analyze();
+    var took = Date.now() - t0;
+    if (took > LIVE_SLOW_MS) {
+      $('liveCalc').checked = false;
+      $('liveStatus').textContent = '계산에 ' + (took / 1000).toFixed(1) + '초 걸려 즉시 다시 계산을 껐습니다 — 「다시 계산」을 누르세요';
+    } else $('liveStatus').textContent = '바로 다시 계산했습니다';
+  }
+  function scheduleLive(e) {
+    if (e && e.target && e.target.id === 'liveCalc') return;
+    if (!$('liveCalc').checked) return;
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(liveRecalc, LIVE_DELAY);
+  }
+  sf.addEventListener('input', scheduleLive);
+  sf.addEventListener('change', scheduleLive);
 
   function analyze() {
     var lz = L.linearize(state.groups, state.settings);   // 원본이 dB 인 채널 → 선형 진폭
@@ -289,10 +369,26 @@
   $('groupSelect').addEventListener('change', function (e) {
     state.groupIdx = parseInt(e.target.value, 10) || 0;
     delete state.extra[state.groupIdx];
-    ['mapLo', 'mapHi', 'mapCMin', 'mapCMax'].forEach(function (id) { $(id).value = ''; });
+    resetRanges();
     renderResults();
   });
   function current() { return state.results[state.groupIdx]; }
+
+  // ── 축 범위 · 그래프 높이 ──
+  var LINE_RANGE = ['lineXLo', 'lineXHi', 'lineYLo', 'lineYHi'], MAP_RANGE = ['mapLo', 'mapHi', 'mapRLo', 'mapRHi', 'mapCMin', 'mapCMax'];
+  function resetRanges(which) {
+    (which === 'line' ? LINE_RANGE : which === 'map' ? MAP_RANGE : LINE_RANGE.concat(MAP_RANGE)).forEach(function (id) { $(id).value = ''; });
+  }
+  function chartHeight(kind) {
+    var H = L.CHART_HEIGHT, narrow = document.documentElement.clientWidth < 560;
+    var dflt = narrow ? 300 : kind === 'line' ? 360 : 380;
+    return view[kind + 'H'] == null ? dflt : L.clampNum(view[kind + 'H'], H.min, H.max, dflt);
+  }
+  function redraw(kind) {
+    if (!current()) return;
+    if (kind !== 'map') drawLine(lineResults());
+    if (kind !== 'line') drawMap(current());
+  }
 
   function renderResults() {
     var res = current(); if (!res) return;
@@ -336,11 +432,14 @@
   function niceMax(v) { if (!(v > 0)) return 1; var p = Math.pow(10, Math.floor(Math.log10(v))); var n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
   function drawLine(list) {
     var svg = $('lineChart');
-    var W = 800, H = 360, m = { l: 64, r: 16, t: 14, b: 44 };
+    // 화면 폭 그대로 그립니다(글자 크기가 폭에 따라 줄지 않게). 높이는 「끌어서 높이 조절」 값
+    var W = Math.max(280, Math.round($('lineWrap').clientWidth || 800)), H = chartHeight('line'), m = { l: 64, r: 16, t: 14, b: 44 };
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.style.height = H + 'px';
+    $('lineHText').textContent = '(' + H + 'px)';
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     var NS = 'http://www.w3.org/2000/svg';
-    function s(tag, a, txt) { var el = document.createElementNS(NS, tag); Object.keys(a).forEach(function (k) { el.setAttribute(k, a[k]); }); if (txt != null) el.textContent = txt; svg.appendChild(el); return el; }
+    function s(tag, a, txt) { var el = document.createElementNS(NS, tag); Object.keys(a).forEach(function (k) { if (a[k] != null) el.setAttribute(k, a[k]); }); if (txt != null) el.textContent = txt; svg.appendChild(el); return el; }
     var multi = list.length > 1;
     // 계열 = 채널 × 오더 (+ 오더 RSS 합산)
     var series = [];
@@ -360,6 +459,14 @@
     if (!(y1 >= y0)) { ymin = 0; ymax = 1; }
     else if (allLinear) { ymin = 0; ymax = niceMax(y1); }
     else { var pad = (y1 - y0 || 1) * 0.12; ymin = Math.floor(y0 - pad); ymax = Math.ceil(y1 + pad); }
+    // 축 범위 입력 (빈칸 = 자동, v34 「그래프 축 범위」)
+    $('lineXLo').placeholder = '자동 ' + fmt(r0, 0); $('lineXHi').placeholder = '자동 ' + fmt(r1, 0);
+    $('lineYLo').placeholder = '자동 ' + fmt(ymin); $('lineYHi').placeholder = '자동 ' + fmt(ymax);
+    var ukl = Object.keys(units).filter(Boolean), ul = ukl.length === 1 ? ' (' + ukl[0] + ')' : '';
+    $('lineYLoLabel').textContent = '진폭 최소' + ul; $('lineYHiLabel').textContent = '진폭 최대' + ul;
+    var xr = L.resolveRange(r0, r1, $('lineXLo').value, $('lineXHi').value), yr = L.resolveRange(ymin, ymax, $('lineYLo').value, $('lineYHi').value);
+    r0 = xr.lo; r1 = xr.hi; ymin = yr.lo; ymax = yr.hi;
+    var inView = function (p) { return p.rpm >= r0 - 1e-9 && p.rpm <= r1 + 1e-9 && p.disp >= ymin - 1e-12 && p.disp <= ymax + 1e-12; };
     var X = function (r) { return m.l + (r - r0) / (r1 - r0) * (W - m.l - m.r); };
     var Y = function (a) { return H - m.b - (a - ymin) / (ymax - ymin) * (H - m.t - m.b); };
     for (var i = 0; i <= 4; i++) {
@@ -367,8 +474,9 @@
       s('line', { x1: m.l, x2: W - m.r, y1: Y(yv), y2: Y(yv), stroke: '#e3e8ee' });
       s('text', { x: m.l - 6, y: Y(yv) + 4, 'text-anchor': 'end', 'font-size': 12, fill: '#56616f' }, fmt(yv));
     }
-    for (var j = 0; j <= 5; j++) {
-      var xv = r0 + (r1 - r0) * j / 5;
+    var xt = W < 480 ? 4 : 5;
+    for (var j = 0; j <= xt; j++) {
+      var xv = r0 + (r1 - r0) * j / xt;
       s('text', { x: X(xv), y: H - m.b + 18, 'text-anchor': 'middle', 'font-size': 12, fill: '#56616f' }, String(Math.round(xv)));
     }
     var uk = Object.keys(units).filter(Boolean);
@@ -376,6 +484,12 @@
     s('text', { x: 14, y: m.t + (H - m.t - m.b) / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430', transform: 'rotate(-90 14 ' + (m.t + (H - m.t - m.b) / 2) + ')' }, '오더 진폭' + (uk.length === 1 ? ' (' + uk[0] + ')' : uk.length > 1 ? ' (단위 섞임)' : ''));
     s('line', { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, stroke: '#8a95a3' });
     s('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: '#8a95a3' });
+    // 그림 영역 밖(입력한 축 범위 밖)은 잘라 냅니다 — 가장자리 점이 반만 보이지 않게 4px 여유
+    var defs = s('defs', {}), cp = document.createElementNS(NS, 'clipPath');
+    cp.setAttribute('id', 'lineClip'); defs.appendChild(cp);
+    var cr = document.createElementNS(NS, 'rect');
+    [['x', m.l - 4], ['y', m.t - 4], ['width', W - m.l - m.r + 8], ['height', H - m.t - m.b + 8]].forEach(function (kv) { cr.setAttribute(kv[0], kv[1]); });
+    cp.appendChild(cr);
     var pts = [];
     var legend = $('lineLegend'); legend.textContent = '';
     series.forEach(function (se, k) {
@@ -387,11 +501,11 @@
         d += (pen ? 'L' : 'M') + X(p.rpm).toFixed(1) + ' ' + Y(p.disp).toFixed(1) + ' ';
         pen = true;
         if (!best || p.disp > best.disp) best = p;
-        pts.push({ x: X(p.rpm), y: Y(p.disp), p: p, se: se, name: name, color: color });
+        if (inView(p)) pts.push({ x: X(p.rpm), y: Y(p.disp), p: p, se: se, name: name, color: color });
       });
-      if (d) s('path', { d: d, fill: 'none', stroke: color, 'stroke-width': se.rss ? 2.8 : 2.2, 'stroke-dasharray': se.rss ? '7 4' : null });
+      if (d) s('path', { d: d, fill: 'none', stroke: color, 'stroke-width': se.rss ? 2.8 : 2.2, 'stroke-dasharray': se.rss ? '7 4' : null, 'clip-path': 'url(#lineClip)' });
       se.points.forEach(function (p) {
-        if (p.disp == null) return;
+        if (p.disp == null || !inView(p)) return;
         s('circle', { cx: X(p.rpm), cy: Y(p.disp), r: p.matched ? 2.8 : 3.6, fill: p.matched ? color : '#fff', stroke: p.matched ? color : '#c62828', 'stroke-width': p.matched ? 1 : 2 });
       });
       legend.appendChild(h('span', null, h('i', { style: 'background:' + color + (se.rss ? ';height:3px;background:repeating-linear-gradient(90deg,' + color + ' 0 6px,transparent 6px 9px)' : '') }),
@@ -438,10 +552,11 @@
 
   // 스펙트럼 컬러맵 (canvas) — x: 주파수 또는 오더, y: RPM, 색: 표시 단위(선형·dB·dBA)
   var mapGeom = null;
-  function numOrNull(id) { var v = $(id).value.trim(); return v === '' || isNaN(Number(v)) ? null : Number(v); }
   function drawMap(res) {
     var cv = $('colorMap'), wrap = $('mapWrap');
-    var cssW = wrap.clientWidth, cssH = cv.clientHeight || 380;
+    var cssW = wrap.clientWidth, cssH = chartHeight('map');
+    cv.style.height = cssH + 'px';
+    $('mapHText').textContent = '(' + cssH + 'px)';
     var dpr = window.devicePixelRatio || 1;
     cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
     var ctx = cv.getContext('2d');
@@ -453,31 +568,35 @@
     var xOf = function (s, i) { return axis === 'order' ? L.toOrder(s.freqs[i], s.rpm, ratio) : s.freqs[i]; };
     var d0 = Infinity, d1 = -Infinity;
     sp.forEach(function (s) { d0 = Math.min(d0, xOf(s, 0)); d1 = Math.max(d1, xOf(s, s.freqs.length - 1)); });
-    var lo = numOrNull('mapLo'), hi = numOrNull('mapHi');
-    var x0 = lo != null ? lo : d0, x1 = hi != null ? hi : d1;
-    if (!(x1 > x0)) { x0 = d0; x1 = d1; }
-    if (x1 === x0) x1 = x0 + 1;
+    var xr = L.resolveRange(d0, d1, $('mapLo').value, $('mapHi').value), x0 = xr.lo, x1 = xr.hi;
     $('mapLo').placeholder = '자동 ' + fmt(d0, axis === 'order' ? 2 : 0); $('mapHi').placeholder = '자동 ' + fmt(d1, axis === 'order' ? 2 : 0);
     // 표시값(dB 등)으로 바꾼 뒤 보이는 범위에서 색 범위를 잡습니다
     var vals = sp.map(function (s) { return s.amps.map(function (a, i) { return L.displayOf(a, s.freqs[i], dsp.mode, dsp.ref); }); });
-    var c0 = Infinity, c1 = -Infinity;
-    sp.forEach(function (s, k) { for (var i = 0; i < s.freqs.length; i++) { var xv = xOf(s, i), v = vals[k][i]; if (v != null && xv >= x0 && xv <= x1) { if (v < c0) c0 = v; if (v > c1) c1 = v; } } });
-    if (!(c1 >= c0)) { c0 = 0; c1 = 1; }
-    var cmin = numOrNull('mapCMin'), cmax = numOrNull('mapCMax');
-    $('mapCMin').placeholder = '자동 ' + fmt(c0); $('mapCMax').placeholder = '자동 ' + fmt(c1);
-    if (cmin != null) c0 = cmin; if (cmax != null) c1 = cmax;
-    if (!(c1 > c0)) c1 = c0 + (Math.abs(c0) || 1) * 1e-6;
-    var r0 = sp[0].rpm, r1 = sp[sp.length - 1].rpm;
-    var X = function (v) { return m.l + (v - x0) / (x1 - x0) * pw; };
+    // RPM 행 경계 — 이웃 RPM 과의 가운데
     var rEdges = sp.map(function (s, k) {
       var lo2 = k ? (sp[k - 1].rpm + s.rpm) / 2 : s.rpm - (sp.length > 1 ? (sp[1].rpm - s.rpm) / 2 : 1);
       var hi2 = k < sp.length - 1 ? (s.rpm + sp[k + 1].rpm) / 2 : s.rpm + (sp.length > 1 ? (s.rpm - sp[k - 1].rpm) / 2 : 1);
       return [lo2, hi2];
     });
-    var R0 = rEdges[0][0], R1 = rEdges[rEdges.length - 1][1];
+    var rAuto0 = rEdges[0][0], rAuto1 = rEdges[rEdges.length - 1][1];
+    $('mapRLo').placeholder = '자동 ' + fmt(sp[0].rpm, 0); $('mapRHi').placeholder = '자동 ' + fmt(sp[sp.length - 1].rpm, 0);
+    var rr = L.resolveRange(rAuto0, rAuto1, $('mapRLo').value, $('mapRHi').value);
+    var R0 = rr.lo, R1 = rr.hi;
+    var rowIn = function (k) { return rEdges[k][1] > R0 && rEdges[k][0] < R1; };
+    var c0 = Infinity, c1 = -Infinity;
+    sp.forEach(function (s, k) { if (!rowIn(k)) return; for (var i = 0; i < s.freqs.length; i++) { var xv = xOf(s, i), v = vals[k][i]; if (v != null && xv >= x0 && xv <= x1) { if (v < c0) c0 = v; if (v > c1) c1 = v; } } });
+    if (!(c1 >= c0)) { c0 = 0; c1 = 1; }
+    $('mapCMin').placeholder = '자동 ' + fmt(c0); $('mapCMax').placeholder = '자동 ' + fmt(c1);
+    var crg = L.resolveRange(c0, c1 > c0 ? c1 : c0 + (Math.abs(c0) || 1) * 1e-6, $('mapCMin').value, $('mapCMax').value);
+    c0 = crg.lo; c1 = crg.hi;
+    var r0 = sp[0].rpm, r1 = sp[sp.length - 1].rpm;
+    var X = function (v) { return m.l + (v - x0) / (x1 - x0) * pw; };
     var Y = function (r) { return m.t + ph - (r - R0) / (R1 - R0) * ph; };
     ctx.fillStyle = '#eef1f5'; ctx.fillRect(m.l, m.t, pw, ph);
+    // 칸·피크·오더 선은 모두 그림 영역 안으로 잘라 냅니다(RPM 범위를 좁혔을 때 축 글자 위로 넘치지 않게)
+    ctx.save(); ctx.beginPath(); ctx.rect(m.l, m.t, pw, ph); ctx.clip();
     sp.forEach(function (s, k) {
+      if (!rowIn(k)) return;
       var yTop = Y(rEdges[k][1]), yBot = Y(rEdges[k][0]);
       for (var i = 0; i < s.freqs.length; i++) {
         var xc = xOf(s, i), v = vals[k][i];
@@ -492,7 +611,6 @@
         if (b > a) ctx.fillRect(a, Math.floor(yTop), b - a, Math.ceil(yBot) - Math.floor(yTop));
       }
     });
-    ctx.save(); ctx.beginPath(); ctx.rect(m.l, m.t, pw, ph); ctx.clip();
     var peakPts = [];
     if ($('showPeaks').checked) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4;
@@ -501,6 +619,7 @@
           var xv = axis === 'order' ? p.order : p.freq;
           if (xv < x0 || xv > x1) return;
           var px = X(xv), py = Y(sp[k].rpm);
+          if (sp[k].rpm < R0 || sp[k].rpm > R1) return;
           peakPts.push({ x: px, y: py, rpm: row.rpm, p: p });
           ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.stroke();
         });
@@ -534,7 +653,8 @@
     ctx.fillText(axis === 'order' ? '오더' : '주파수 (Hz)', m.l + pw / 2, cssH - 6);
     ctx.textAlign = 'right'; ctx.fillStyle = '#56616f';
     // RPM 이 12개 이하이면 행마다 이름(v34 와 같음), 많으면 5개 눈금
-    var rt = sp.length <= 12 ? sp.map(function (x) { return x.rpm; }) : [0, 1, 2, 3, 4].map(function (q) { return Math.round(r0 + (r1 - r0) * q / 4); });
+    var rvis = sp.map(function (x) { return x.rpm; }).filter(function (rv) { return rv >= R0 && rv <= R1; });
+    var rt = rvis.length <= 12 ? rvis : [0, 1, 2, 3, 4].map(function (q) { return Math.round(Math.max(R0, r0) + (Math.min(R1, r1) - Math.max(R0, r0)) * q / 4); });
     rt.forEach(function (rv) { ctx.fillText(String(rv), m.l - 6, Y(rv) + 4); });
     ctx.save(); ctx.translate(12, m.t + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillStyle = '#1b2430'; ctx.fillText('RPM', 0, 0); ctx.restore();
     mapGeom = { m: m, pw: pw, ph: ph, x0: x0, x1: x1, R0: R0, R1: R1, sp: sp, res: res, axis: axis, peakPts: peakPts, orderLines: orderLines, vals: vals };
@@ -589,11 +709,47 @@
   }
   $('axisHz').addEventListener('click', function () { setAxis('hz'); });
   $('axisOrder').addEventListener('click', function () { setAxis('order'); });
-  ['showPeaks', 'showOrders', 'mapLo', 'mapHi', 'mapCMin', 'mapCMax'].forEach(function (id) {
-    $(id).addEventListener('change', function () { if (current()) drawMap(current()); });
+  // 범위 칸은 입력하는 동안에도 0.3초 뒤 다시 그립니다(Enter·칸 벗어남은 바로)
+  var rangeTimer;
+  function rangeInput(kind) { clearTimeout(rangeTimer); rangeTimer = setTimeout(function () { redraw(kind); }, 300); }
+  ['showPeaks', 'showOrders'].concat(MAP_RANGE).forEach(function (id) {
+    $(id).addEventListener('change', function () { clearTimeout(rangeTimer); redraw('map'); });
+    if (MAP_RANGE.indexOf(id) >= 0) $(id).addEventListener('input', function () { rangeInput('map'); });
+  });
+  LINE_RANGE.forEach(function (id) {
+    $(id).addEventListener('change', function () { clearTimeout(rangeTimer); redraw('line'); });
+    $(id).addEventListener('input', function () { rangeInput('line'); });
+  });
+  $('lineAuto').addEventListener('click', function () { resetRanges('line'); redraw('line'); });
+  $('mapAuto').addEventListener('click', function () { resetRanges('map'); redraw('map'); });
+
+  // 끌어서 높이 조절 — 손잡이를 위아래로 끌거나(터치 포함), 초점을 두고 위·아래 화살표(20px), 두 번 누르면 기본 높이
+  document.querySelectorAll('.resize-handle').forEach(function (hd) {
+    var kind = hd.getAttribute('data-kind'), drag = null, raf = 0;
+    function setH(px, save) {
+      var H = L.CHART_HEIGHT;
+      view[kind + 'H'] = px == null ? null : L.clampNum(px, H.min, H.max, H.dflt);
+      if (!raf) raf = requestAnimationFrame(function () { raf = 0; redraw(kind); });
+      if (save) S.setView(kind === 'line' ? { lineH: view.lineH } : { mapH: view.mapH });
+    }
+    hd.addEventListener('pointerdown', function (e) {
+      drag = { y: e.clientY, h: chartHeight(kind) };
+      hd.classList.add('active');
+      try { hd.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+      e.preventDefault();
+    });
+    hd.addEventListener('pointermove', function (e) { if (drag) setH(drag.h + e.clientY - drag.y, false); });
+    function end() { if (!drag) return; drag = null; hd.classList.remove('active'); setH(chartHeight(kind), true); }
+    hd.addEventListener('pointerup', end);
+    hd.addEventListener('pointercancel', end);
+    hd.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault(); setH(chartHeight(kind) + (e.key === 'ArrowUp' ? -20 : 20), true);
+    });
+    hd.addEventListener('dblclick', function () { setH(null, true); });
   });
   var resizeTimer;
-  window.addEventListener('resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { if (current()) drawMap(current()); }, 150); });
+  window.addEventListener('resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { redraw(); }, 150); });
 
   function table(el, rows, numCols) {
     el.textContent = '';
@@ -619,6 +775,7 @@
     b.addEventListener('click', function () {
       var kind = b.getAttribute('data-save');
       if (kind !== 'log' && !state.results.length) { toast('먼저 데이터를 불러와 분석하세요', true); return; }
+      if (kind === 'xlsx') { saveXlsx(); return; }
       var rows, suffix;
       if (kind === 'track') { rows = L.trackRows(state.results); suffix = '오더추적'; }
       else if (kind === 'ordermax') { rows = L.orderMaxRows(state.results); suffix = '오더별최대'; }
@@ -629,6 +786,37 @@
       download(baseName() + '_' + suffix + '.csv', L.toCsv(rows));
     });
   });
+
+  // XLSX — SheetJS(vendor/xlsx.full.min.js, 인터넷 없이 동작)는 처음 누를 때 한 번만 불러옵니다(약 0.9 MB)
+  function withXlsx(done) {
+    if (window.XLSX) { done(window.XLSX); return; }
+    var sc = document.createElement('script');
+    sc.src = 'vendor/xlsx.full.min.js';
+    sc.onload = function () { if (window.XLSX) done(window.XLSX); else toast('XLSX 라이브러리를 불러오지 못했습니다', true); };
+    sc.onerror = function () { toast('XLSX 라이브러리(vendor/xlsx.full.min.js)를 불러오지 못했습니다 — CSV 로 저장하세요', true); };
+    document.head.appendChild(sc);
+  }
+  function saveXlsx() {
+    var cur = current();
+    var sheets = L.workbookSheets(state.results, state.settings, allLog(), {
+      fileName: state.isSample ? '(예시 데이터) ' + state.fileName : state.fileName,
+      savedAt: new Date().toLocaleString('ko-KR'),
+      channel: '모든 채널 (' + state.results.length + '개) — 화면: ' + (cur ? L.groupLabel(cur.group) : '-')
+    });
+    withXlsx(function (X) {
+      try {
+        var wb = X.utils.book_new();
+        sheets.forEach(function (sh) {
+          var ws = X.utils.aoa_to_sheet(sh.rows);
+          var n = sh.rows.reduce(function (mx, r) { return Math.max(mx, r.length); }, 0);
+          ws['!cols'] = Array.from({ length: n }, function (_, i) { return { wch: sh.name === '경고 로그' && i === 2 ? 80 : i === 0 ? 18 : 15 }; });   // v34 열 너비
+          X.utils.book_append_sheet(wb, ws, sh.name);
+        });
+        X.writeFile(wb, baseName() + '_오더분석.xlsx');
+        toast('XLSX 를 저장했습니다 — 시트 ' + sheets.length + '개, Order Analysis ' + (sheets[1].rows.length - 1) + '행');
+      } catch (err) { toast('XLSX 저장 중 오류: ' + err.message, true); }
+    });
+  }
 
   // ── 경고 로그 ──
   function allLog() { return state.importLog.concat(state.analysisLog); }

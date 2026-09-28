@@ -293,7 +293,7 @@ test('Testlab 옛 배치 — Curve별 X/Y 반복 열, 빠진 RPM·읽지 못한 
     '10,1,10,2,10,3', '20,4,20,5,20,6'].join('\n'));
   const n = L.normalize(rows, { layout: 'testlab' });
   assert.deepEqual(n.groups.map(g => g.key), ['A|X|vibration', 'B|Y|vibration']);
-  assert.deepEqual(n.groups[1].spectra[0], { rpm: 1000, freqs: [10, 20], amps: [2, 5], scale: 'linear' });
+  assert.deepEqual(n.groups[1].spectra[0], { rpm: 1000, freqs: [10, 20], amps: [2, 5], scale: 'linear', curveNo: 2 });   // Curve 번호 = v34 XLSX 「Curve」 열
   assert.ok(n.log.some(x => x.message.includes('Curve 3') && x.message.includes('RPM')));
 });
 test('합성 예시(Testlab 형식) — 실제 파일과 같은 배치로 읽힘, 200 KB 미만', () => {
@@ -401,6 +401,137 @@ test('v34 와 맞대기 — 실제 파일 2종 + 합성 예시, 단일 오더·R
     }
   }
   assert.ok(compared > 500, '비교 수 ' + compared);
+});
+
+// ── 2026-09-29 3차: XLSX 저장·축 범위·그래프 높이·설정 검사 ──
+test('XLSX Order Analysis 시트 — v34 buildOrderAnalysisXlsxRows 와 같은 열·같은 값 (실제 파일 2종)', () => {
+  const HEAD = ['채널', '위치', '방향', '오더', 'RPM', 'Curve', '1X주파수_Hz', '이론오더주파수_Hz', '검출피크주파수_Hz', '주파수편차_Hz', '피크검색하한_Hz', '피크검색상한_Hz', '피크검색반폭_Hz',
+    '합산하한_Hz', '합산상한_Hz', '합산반폭_Hz', '합산포인트수', '단일피크진폭', 'Order합산진폭', '표시진폭', '표시단위', '판정'];
+  let compared = 0;
+  for (const [file, orders] of [[REAL[0], [36, 45]], [REAL[1], [39]]]) {
+    const text = readSrc(file);
+    const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' });
+    const rep = v34Read(v, text, file);
+    const settings = { orders: orders.join(','), searchHz: 1, sumHz: 1, noiseMode: 'db', vibMode: 'linear' };
+    const results = L.analyzeAll(L.linearize(readTl(text).n.groups, {}).groups, settings);
+    const rows = L.xlsxOrderAnalysisRows(results);
+    assert.deepEqual(rows[0], HEAD);
+    let r = 1;
+    for (const res of results) {
+      const id = L.channelId(res.group), ch = rep.normalized.channels[id];
+      assert.ok(ch, file + ' 채널 ' + id);
+      const cs = res.group.channelType === 'noise' ? 'db' : 'linear', ref = res.group.channelType === 'noise' ? 2e-5 : 1.0197e-7;
+      for (const o of orders) {
+        for (const t of v.calculateOrderRows(ch, o, 1, 1, 1)) {
+          const disp = v.convertAmplitude(t.orderAmplitude, t.peakFrequency, cs, ref, t.sourceUnit, ref);
+          const want = [id, ch.point, ch.direction || '', t.order, t.rpm, t.curveNo, t.rotationFrequency, t.targetFrequency, t.peakFrequency, t.frequencyDeviation,
+            t.searchMin, t.searchMax, t.searchHalfWidth, t.sumMin, t.sumMax, t.sumHalfWidth, t.summedPointCount, t.peakAmplitude, t.orderAmplitude, disp];
+          const got = rows[r++];
+          want.forEach((w, c) => {
+            const at = file + ' ' + id + ' ' + o + '차 ' + t.rpm + ' 열 ' + HEAD[c];
+            if (typeof w === 'number' && !Number.isFinite(w)) assert.equal(got[c], null, at);
+            else if (typeof w === 'number') assert.ok(Math.abs(got[c] - w) <= Math.max(1e-9, Math.abs(w) * 1e-9), at + ' ' + got[c] + ' ≠ ' + w);
+            else assert.equal(got[c], w, at);
+          });
+          assert.equal(got[21], t.matched ? '일치' : '불일치');
+          compared++;
+        }
+      }
+    }
+    assert.equal(r, rows.length, file + ' 행 수');
+  }
+  assert.ok(compared > 50, '비교 행 ' + compared);
+});
+
+test('XLSX Order RSS Sum 시트 — v34 와 같은 열, 구성 오더 범위 문자열·RSS 값', () => {
+  const text = readSrc(REAL[0]);
+  const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' });
+  const rep = v34Read(v, text, REAL[0]);
+  const results = L.analyzeAll(L.linearize(readTl(text).n.groups, {}).groups, { orders: '36, 45', searchHz: 1, sumHz: 1 });
+  const rows = L.xlsxRssRows(results);
+  assert.deepEqual(rows[0], ['채널', '위치', '방향', '합산 오더', 'RPM', '구성 오더별 진폭', '오더별 피크 중심 합산 범위', 'RSS 합산 내부값', '표시진폭', '표시단위', '구성 오더 유효성']);
+  const f2 = x => Number.isFinite(Number(x)) ? Number(x).toFixed(2) : '-';
+  let r = 1;
+  for (const res of results) {
+    const id = L.channelId(res.group);
+    const sel = { searchWidth: 1, sumWidth: 1, settings: { noise: { mode: 'db', sourceDbReference: 2e-5, orderDbReference: 2e-5 }, vibration: { mode: 'linear', sourceDbReference: 1.0197e-7, orderDbReference: 1.0197e-7 } } };
+    const tr = v.buildRssSumSeries(rep.normalized.channels[id], id, [36, 45], sel, '#000');
+    for (const t of tr.rows) {
+      const got = rows[r++];
+      assert.equal(got[0], id); assert.equal(got[3], '36 + 45'); assert.equal(got[4], t.rpm);
+      assert.equal(got[6], t.componentRows.map(x => `${x.order}차: ${f2(x.row.sumMin)}~${f2(x.row.sumMax)} Hz`).join(' | '));
+      close(got[7], t.orderAmplitude, t.orderAmplitude * 1e-9);
+      assert.equal(got[10], t.matched ? '모두 일치' : '일부 불일치');
+      assert.match(got[5], /^36차=\S+ g \| 45차=\S+ g$/);
+    }
+  }
+  assert.equal(r, rows.length);
+  assert.equal(L.sig4(0.000123456), '1.235e-4'); assert.equal(L.sig4(12.3456), '12.35'); assert.equal(L.sig4(12345), (12345).toExponential(3)); assert.equal(L.sig4(null), '-');
+});
+
+test('XLSX 시트 목록 — v34 세 시트 + 이 도구 표, RSS 시트는 오더 2개 이상일 때만, SheetJS 로 쓰고 다시 읽기', () => {
+  const XLSX = require('../vendor/xlsx.full.min.js');
+  const groups = L.linearize(readTl(Sample.testlabCsv()).n.groups, {}).groups;
+  const log = [{ level: '경고', line: 12, message: '예시' }];
+  const two = L.workbookSheets(L.analyzeAll(groups, { orders: '36, 45' }), { orders: '36, 45' }, log, { fileName: 'a.csv', savedAt: 'x' });
+  assert.deepEqual(two.map(s => s.name), ['Settings', 'Order Analysis', 'Order RSS Sum', '오더별 최대', '피크 목록', '에너지 합산', '경고 로그']);
+  const one = L.workbookSheets(L.analyzeAll(groups, { orders: '36' }), { orders: '36' }, log, {});
+  assert.ok(!one.some(s => s.name === 'Order RSS Sum'));
+  const set = Object.fromEntries(two[0].rows.slice(1));
+  assert.equal(set['원본 CSV'], 'a.csv'); assert.equal(set['Peak Search Range (±Hz)'], 1); assert.equal(set['Noise 표시 단위'], 'dB'); assert.equal(set['Vibration 표시 단위'], 'Amplitude');
+  two.forEach(s => assert.ok(s.name.length <= 31 && !/[\[\]:*?\/\\]/.test(s.name)));
+  // 쓰고 다시 읽기
+  const wb = XLSX.utils.book_new();
+  two.forEach(s => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.rows), s.name));
+  const back = XLSX.read(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+  assert.deepEqual(back.SheetNames, two.map(s => s.name));
+  const oa = XLSX.utils.sheet_to_json(back.Sheets['Order Analysis'], { header: 1, defval: null });
+  assert.equal(oa.length, two[1].rows.length);
+  assert.equal(typeof oa[1][4], 'number');                    // RPM 은 숫자 칸
+  assert.equal(oa[1][21], two[1].rows[1][21]);
+  const lg = XLSX.utils.sheet_to_json(back.Sheets['경고 로그'], { header: 1 });
+  assert.deepEqual(lg[1], ['경고', 12, '예시']);
+});
+
+test('축 범위 — 빈칸은 자동, 한쪽만 입력, 뒤집히거나 같으면 자동으로, 숫자 아닌 값 무시', () => {
+  assert.deepEqual(L.resolveRange(0, 10, '', ''), { lo: 0, hi: 10, custom: false });
+  assert.deepEqual(L.resolveRange(0, 10, '2', ''), { lo: 2, hi: 10, custom: true });
+  assert.deepEqual(L.resolveRange(0, 10, '', '4.5'), { lo: 0, hi: 4.5, custom: true });
+  assert.deepEqual(L.resolveRange(0, 10, '8', '3'), { lo: 0, hi: 10, custom: false });   // 뒤집힘 → 자동
+  assert.deepEqual(L.resolveRange(0, 10, '12', ''), { lo: 0, hi: 10, custom: false });  // 최소가 자동 최대보다 큼 → 자동
+  assert.deepEqual(L.resolveRange(0, 10, 'abc', '1,000'), { lo: 0, hi: 1000, custom: true });
+  assert.deepEqual(L.resolveRange(-40, -40, null, null), { lo: -40, hi: -39, custom: false });  // 폭 0 → 1 벌림
+  assert.deepEqual(L.resolveRange(0, 10, -5, 20), { lo: -5, hi: 20, custom: true });
+});
+
+test('그래프 높이 — 범위 안으로 자르고 정수로, 빈칸·글자는 기본값', () => {
+  const H = L.CHART_HEIGHT;
+  assert.equal(L.clampNum('500', H.min, H.max, H.dflt), 500);
+  assert.equal(L.clampNum('100', H.min, H.max, H.dflt), H.min);
+  assert.equal(L.clampNum(5000, H.min, H.max, H.dflt), H.max);
+  assert.equal(L.clampNum('', H.min, H.max, H.dflt), H.dflt);
+  assert.equal(L.clampNum('x', H.min, H.max, H.dflt), H.dflt);
+  assert.equal(L.clampNum('333.6', H.min, H.max, H.dflt), 334);
+});
+
+test('설정 검사 — 즉시 다시 계산과 「다시 계산」 버튼이 같은 규칙', () => {
+  const ok = Object.assign({}, L.DEFAULT_SETTINGS);
+  assert.equal(L.validateSettings(ok), null);
+  assert.match(L.validateSettings({ ...ok, orders: 'abc' }), /오더/);
+  assert.match(L.validateSettings({ ...ok, trackMethod: 'max', halfWidth: '0' }), /반폭/);
+  assert.equal(L.validateSettings({ ...ok, trackMethod: 'peak', halfWidth: '0' }), null);
+  assert.match(L.validateSettings({ ...ok, ratio: '0' }), /회전비/);
+  assert.match(L.validateSettings({ ...ok, searchHz: '' }), /검색/);
+  assert.match(L.validateSettings({ ...ok, sumHz: '-1' }), /합산/);
+  assert.equal(L.validateSettings({ ...ok, searchHz: '0', sumHz: 0 }), null);
+  assert.match(L.validateSettings({ ...ok, vibSrcRef: '0' }), /기준값/);
+});
+
+test('칸 수 — 실제 파일 크기와 즉시 다시 계산 한도', () => {
+  assert.equal(L.cellCount(readTl(readSrc(REAL[0])).n.groups), 20 * 1001);
+  assert.equal(L.cellCount(readTl(readSrc(REAL[1])).n.groups), 60 * 1001);
+  assert.ok(L.cellCount(readTl(readSrc(REAL[1])).n.groups) < L.LIVE_CELL_LIMIT);
+  assert.equal(L.cellCount([]), 0);
 });
 
 console.log(process.exitCode ? '\n실패가 있습니다' : '\n' + passed + '개 모두 통과');

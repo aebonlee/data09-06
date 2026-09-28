@@ -444,7 +444,7 @@
       if (!g) { g = groups[key] = { key: key, channel: ch, direction: cv.direction, unit: cv.unit, channelType: cv.channelType, byRpm: {} }; order.push(key); }
       else if (cv.unit && g.unit && cv.unit !== g.unit && !g._unitWarned) { warn(1, groupLabel(g) + ' 안에서 단위가 다릅니다(' + g.unit + ' / ' + cv.unit + ') — 처음 단위로 표시합니다'); g._unitWarned = true; }
       if (g.byRpm[cv.rpm]) { warn(1, groupLabel(g) + ' · ' + cv.rpm + ' RPM Curve 가 또 있습니다(' + name + ') — 처음 것만 씁니다'); stats.skipped++; return; }
-      g.byRpm[cv.rpm] = { rpm: cv.rpm, freqs: freqs, amps: amps, scale: cv.scale };
+      g.byRpm[cv.rpm] = { rpm: cv.rpm, freqs: freqs, amps: amps, scale: cv.scale, curveNo: cv.curveNo };
       allRpms[cv.rpm] = true;
     });
     var rpmList = Object.keys(allRpms).map(Number).sort(function (a, b) { return a - b; });
@@ -554,7 +554,7 @@
           var a = ts.srcRef * Math.pow(10, db / 20);
           if (isFinite(a) && a >= 0) { fs.push(sp.freqs[i]); as.push(a); }
         }
-        return { rpm: sp.rpm, freqs: fs, amps: as, scale: 'linear', source: sp.scale };
+        return { rpm: sp.rpm, freqs: fs, amps: as, scale: 'linear', source: sp.scale, curveNo: sp.curveNo };
       });
       var unit = g.unit && unitScale(g.unit) === 'linear' ? g.unit : (g.channelType === 'noise' ? 'Pa' : '');
       return Object.assign({}, g, { spectra: spectra, unit: unit, sourceScale: g.scale, sourceRef: ts.srcRef });
@@ -820,6 +820,137 @@
   }
   function toCsv(rows) { return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
 
+  // ── XLSX 통합 문서 (2026-09-29 3차) ────────────────────────
+  // 앞의 세 시트는 제출자 분석기 v34 의 「Order Analysis XLSX 저장」 과 같은 이름·열입니다
+  // (Settings · Order Analysis · Order RSS Sum — RSS 시트는 오더가 둘 이상일 때만).
+  // 뒤에 이 도구가 더한 표(오더별 최대·피크 목록·에너지 합산·경고 로그)를 붙입니다.
+  // 값은 v34 처럼 반올림하지 않은 숫자로 넣고, 없는 값은 null(빈 칸)입니다.
+  function num(v) { return v == null || typeof v !== 'number' || !isFinite(v) ? null : v; }
+  function sig4(v) {   // v34 formatSig4
+    if (v == null || !isFinite(v)) return '-';
+    if (v === 0) return '0';
+    var a = Math.abs(v);
+    if (a < 1) return v.toExponential(3);
+    var e = Math.floor(Math.log10(a));
+    if (e >= 4) return v.toExponential(3);
+    return v.toFixed(Math.max(0, 3 - e));
+  }
+  function f2(v) { return v == null || !isFinite(v) ? '-' : Number(v).toFixed(2); }
+  // v34 채널 ID: 소음은 위치, 진동은 「위치_방향」
+  function channelId(g) { return g.channelType === 'noise' || !g.direction ? g.channel : g.channel + '_' + g.direction; }
+  var MODE_LABEL = { linear: 'Amplitude', db: 'dB', dba: 'dBA' };
+
+  function xlsxOrderAnalysisRows(results) {
+    var out = [['채널', '위치', '방향', '오더', 'RPM', 'Curve', '1X주파수_Hz', '이론오더주파수_Hz', '검출피크주파수_Hz', '주파수편차_Hz', '피크검색하한_Hz', '피크검색상한_Hz', '피크검색반폭_Hz',
+      '합산하한_Hz', '합산상한_Hz', '합산반폭_Hz', '합산포인트수', '단일피크진폭', 'Order합산진폭', '표시진폭', '표시단위', '판정']];
+    results.forEach(function (res) {
+      var g = res.group, peak = res.method === 'peak';
+      res.tracks.forEach(function (t) {
+        t.points.forEach(function (p, i) {
+          var sp = g.spectra[i] && g.spectra[i].rpm === p.rpm ? g.spectra[i] : null;
+          var f1 = p.rpm * res.ratio / 60;
+          out.push([channelId(g), g.channel, g.direction || '', t.order, p.rpm, sp && sp.curveNo != null ? sp.curveNo : null, f1, t.order * f1,
+            num(p.freq), num(p.dev), num(p.searchMin), num(p.searchMax), peak ? res.searchHz : null,
+            num(p.sumMin), num(p.sumMax), peak ? res.sumHz : null, peak ? p.bins : null, num(p.peakAmp), num(p.amp), num(p.disp), res.display.unit, p.matched ? '일치' : '불일치']);
+        });
+      });
+    });
+    return out;
+  }
+  function xlsxRssRows(results) {
+    var out = [['채널', '위치', '방향', '합산 오더', 'RPM', '구성 오더별 진폭', '오더별 피크 중심 합산 범위', 'RSS 합산 내부값', '표시진폭', '표시단위', '구성 오더 유효성']];
+    results.forEach(function (res) {
+      if (!res.rssSum) return;
+      var g = res.group, os = res.rssSum.orders, u = res.display.unit;
+      res.rssSum.points.forEach(function (p) {
+        var comps = p.comps.map(function (c, k) { return os[k] + '차=' + sig4(c.disp) + ' ' + u; }).join(' | ');
+        var ranges = p.comps.map(function (c, k) { return os[k] + '차: ' + f2(c.sumMin) + '~' + f2(c.sumMax) + ' Hz'; }).join(' | ');
+        out.push([channelId(g), g.channel, g.direction || '', os.join(' + '), p.rpm, comps, ranges, num(p.amp), num(p.disp), u, p.matched ? '모두 일치' : '일부 불일치']);
+      });
+    });
+    return out;
+  }
+  // meta: { fileName, savedAt, channel(지금 보는 채널 이름) }
+  function xlsxSettingsRows(settings, meta) {
+    var s = Object.assign({}, DEFAULT_SETTINGS, settings || {}), m = meta || {};
+    var n = function (v) { var x = Number(v); return v === '' || v == null || !isFinite(x) ? null : x; };
+    return [['항목', '값'],
+      ['Analyzer Version', 'data09-06 오더 분석 도구 (v34 계산 호환)'],
+      ['원본 CSV', m.fileName || '-'],
+      ['저장 시각', m.savedAt || '-'],
+      ['Order Analysis 채널', m.channel || '모든 채널'],
+      ['Order', String(s.orders)],
+      ['Peak Search Range (±Hz)', n(s.searchHz)],
+      ['Sum Width (±Hz)', n(s.sumHz)],
+      ['Noise 표시 단위', MODE_LABEL[s.noiseMode] || s.noiseMode],
+      ['Noise Source dB 기준값', n(s.noiseSrcRef)],
+      ['Noise Order dB 기준값', n(s.noiseRef)],
+      ['Vibration 표시 단위', MODE_LABEL[s.vibMode] || s.vibMode],
+      ['Vibration Source dB 기준값', n(s.vibSrcRef)],
+      ['Vibration Order dB 기준값', n(s.vibRef)],
+      ['오더 진폭 계산 방식 (이 도구)', METHOD_LABEL[s.trackMethod] || s.trackMethod],
+      ['기준축 회전비 (이 도구)', n(s.ratio)],
+      ['오더 대역 반폭 ±오더 (대역 방식)', n(s.halfWidth)],
+      ['RPM 별 피크 개수 (이 도구)', n(s.peakTopN)],
+      ['피크 최소 진폭 (이 도구)', n(s.peakMin)],
+      ['에너지 합산 대역 (이 도구)', bandLabel(s)]];
+  }
+  // CSV 용 표(값은 이미 숫자, 없는 값은 '')를 시트에 쓸 때 '' 는 빈 칸(null)으로
+  function numericCells(rows) {
+    return rows.map(function (r, k) { return k === 0 ? r : r.map(function (v) { return v === '' ? null : v; }); });
+  }
+  // 시트 목록 [{ name, rows }] — 이름은 엑셀 제한(31자, []:*?/\ 금지) 안
+  function workbookSheets(results, settings, log, meta) {
+    var sheets = [{ name: 'Settings', rows: xlsxSettingsRows(settings, meta) }, { name: 'Order Analysis', rows: xlsxOrderAnalysisRows(results) }];
+    var rss = xlsxRssRows(results);
+    if (rss.length > 1) sheets.push({ name: 'Order RSS Sum', rows: rss });
+    sheets.push({ name: '오더별 최대', rows: numericCells(orderMaxRows(results)) });
+    sheets.push({ name: '피크 목록', rows: numericCells(peakRows(results)) });
+    sheets.push({ name: '에너지 합산', rows: numericCells(energyRows(results)) });
+    sheets.push({ name: '경고 로그', rows: numericCells(logRows(log || [])) });
+    return sheets;
+  }
+
+  // ── 그래프 축 범위·높이 (2026-09-29 3차) ────────────────────
+  // 입력 칸 값(빈칸 = 자동) → 실제로 그릴 범위. 최소·최대가 뒤집히거나 같으면 자동 범위로 돌아갑니다.
+  function numOrNull(v) {
+    if (v == null) return null;
+    var t = String(v).trim().replace(/,/g, '');
+    if (t === '') return null;
+    var x = Number(t);
+    return isFinite(x) ? x : null;
+  }
+  function resolveRange(autoLo, autoHi, userLo, userHi) {
+    var lo = numOrNull(userLo), hi = numOrNull(userHi);
+    var a = lo != null ? lo : autoLo, b = hi != null ? hi : autoHi;
+    var custom = lo != null || hi != null;
+    if (!(b > a)) { a = autoLo; b = autoHi; custom = false; }
+    if (!(b > a)) b = a + 1;
+    return { lo: a, hi: b, custom: custom };
+  }
+  function clampNum(v, lo, hi, dflt) {
+    var x = numOrNull(v);
+    if (x == null) return dflt;
+    return Math.min(hi, Math.max(lo, Math.round(x)));
+  }
+  var CHART_HEIGHT = { min: 240, max: 900, dflt: 380 };
+
+  // ── 분석 설정 검사 (화면 · 즉시 다시 계산 공용) ──────────────
+  // 문제가 없으면 null, 있으면 안내 문구
+  function validateSettings(s) {
+    if (!parseOrders(s.orders).length) return '추적할 오더를 하나 이상 적어 주세요 (예: 1, 2)';
+    if (s.trackMethod !== 'peak' && !(Number(s.halfWidth) > 0)) return '오더 대역 반폭은 0보다 커야 합니다';
+    if (!(Number(s.ratio) > 0)) return '회전비는 0보다 커야 합니다';
+    if (!(String(s.searchHz).trim() !== '' && Number(s.searchHz) >= 0) || !(String(s.sumHz).trim() !== '' && Number(s.sumHz) >= 0)) return '피크 검색·합산 범위는 0 이상이어야 합니다';
+    if (!['noiseRef', 'noiseSrcRef', 'vibRef', 'vibSrcRef'].every(function (k) { return Number(s[k]) > 0; })) return 'dB 기준값은 0보다 커야 합니다';
+    return null;
+  }
+  // 즉시 다시 계산을 기본으로 켤지 — 칸(주파수 × RPM × 채널) 수가 이보다 많으면 끕니다
+  var LIVE_CELL_LIMIT = 1500000;
+  function cellCount(groups) {
+    return (groups || []).reduce(function (s, g) { return s + g.spectra.reduce(function (t, sp) { return t + sp.freqs.length; }, 0); }, 0);
+  }
+
   function analyzeAll(groups, settings) {
     return groups.map(function (g) { return analyzeGroup(g, settings); });
   }
@@ -834,6 +965,8 @@
     isTestlab: isTestlab, parseTestlab: parseTestlab, unitScale: unitScale, channelTypeOf: channelTypeOf, rpmFromName: rpmFromName, groupLabel: groupLabel,
     aWeighting: aWeighting, typeSettings: typeSettings, displayOf: displayOf, unitLabel: unitLabel, linearize: linearize,
     trackOrderPeak: trackOrderPeak, freqStep: freqStep, rssOrders: rssOrders, ordersFromName: ordersFromName, METHOD_LABEL: METHOD_LABEL,
+    xlsxOrderAnalysisRows: xlsxOrderAnalysisRows, xlsxRssRows: xlsxRssRows, xlsxSettingsRows: xlsxSettingsRows, workbookSheets: workbookSheets, channelId: channelId, sig4: sig4,
+    resolveRange: resolveRange, clampNum: clampNum, numOrNull: numOrNull, CHART_HEIGHT: CHART_HEIGHT, validateSettings: validateSettings, LIVE_CELL_LIMIT: LIVE_CELL_LIMIT, cellCount: cellCount,
     trackRows: trackRows, rssRows: rssRows, peakRows: peakRows, orderMaxRows: orderMaxRows, energyRows: energyRows, logRows: logRows, toCsv: toCsv
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

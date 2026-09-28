@@ -156,3 +156,25 @@ canvas.chart { height: 380px; }
 .overlay-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 4px 16px; }
 .overlay-list label { display: flex; align-items: center; gap: 8px; min-height: 36px; min-width: 0; overflow-wrap: anywhere; }
 .map-range { margin: 4px 0 12px; }
+
+/* 2026-09-29 3차 — 끌어 놓기, 불러온 파일 목록, 축 범위, 높이 조절, 즉시 다시 계산 */
+.drop-zone { border: 2px dashed var(--line); border-radius: var(--radius); padding: 14px 16px 2px; margin-bottom: 12px; transition: background .15s, border-color .15s; }
+.drop-zone.over, body.dragging .drop-zone { border-color: var(--primary); background: #eaf1fa; }
+.drop-title { font-weight: 700; margin-bottom: 10px; }
+.file-list { margin: 8px 0 0; }
+.axis-range { margin: 4px 0 8px; }
+.range-row { margin-bottom: 12px; }
+.resize-handle {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 32px; margin-top: 4px;
+  border: 1px dashed var(--line); border-radius: var(--radius); background: var(--bg); color: var(--muted); font-size: .85rem; font-weight: 600;
+  cursor: ns-resize; touch-action: none; user-select: none;
+}
+.resize-handle:hover, .resize-handle:focus-visible, .resize-handle.active { border-color: var(--primary); color: var(--primary); }
+svg.chart { height: auto; }
+.live-check { margin-right: auto; }
+.live-status { align-self: center; }
+@media (max-width: 560px) { .live-check { width: 100%; } }
+/* 컬러맵 범위 6칸: 넓은 화면에서는 세로로 짝(가로축 · RPM · 색)을 이루게 */
+@media (min-width: 901px) { .map-range.cols-3 { grid-template-rows: repeat(2, auto); grid-auto-flow: column; } }
+/* 좁은 화면에서도 최소·최대는 한 줄에 둘 (파일 끝에 둬야 위의 1열 규칙을 이깁니다 — §9.7) */
+@media (max-width: 560px) { .form-grid.axis-range, .form-grid.map-range { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; } }

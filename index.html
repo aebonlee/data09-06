@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>소음진동 오더 분석 도구</title>
-  <meta name="description" content="Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 변환·오더 추적·피크 추출·에너지 합산, 오더별 RPM-진폭 그래프와 스펙트럼 컬러맵, 결과 CSV·경고 로그 저장까지 브라우저 안에서 처리하는 도구(1단계)">
+  <meta name="description" content="Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 변환·오더 추적·피크 추출·에너지 합산, 오더별 RPM-진폭 그래프와 스펙트럼 컬러맵, 결과 XLSX·CSV·경고 로그 저장까지 브라우저 안에서 처리하는 도구">
   <meta name="robots" content="noindex">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -32,14 +32,18 @@
     <section id="step-import" class="card">
       <h2>1. 데이터 불러오기</h2>
       <p>Testlab Neo 에서 내보낸 주파수축 CSV 파일을 고릅니다. 「Curve 1」 제목과 Standard\All\… 머리 정보가 붙은 내보내기는 그대로 알아봅니다. 파일은 이 브라우저 안에서만 읽고 어디로도 보내지 않습니다.</p>
-      <div class="import-row">
-        <label class="file-pick">
-          <span class="sr">CSV 파일 선택</span>
-          <input type="file" id="fileInput" accept=".csv,.txt,text/csv,text/plain">
-        </label>
-        <button type="button" class="btn" id="sampleBtn">예시 데이터 불러오기</button>
-        <button type="button" class="btn" id="sampleTlBtn">Testlab 형식 예시 불러오기</button>
+      <div class="drop-zone" id="dropZone">
+        <p class="drop-title">CSV 파일을 여기로 끌어 놓거나 「파일 선택」을 누르세요 <span class="note">(여러 개 가능)</span></p>
+        <div class="import-row">
+          <label class="file-pick">
+            <span class="sr">CSV 파일 선택</span>
+            <input type="file" id="fileInput" accept=".csv,.txt,text/csv,text/plain" multiple>
+          </label>
+          <button type="button" class="btn" id="sampleBtn">예시 데이터 불러오기</button>
+          <button type="button" class="btn" id="sampleTlBtn">Testlab 형식 예시 불러오기</button>
+        </div>
       </div>
+      <label class="field inline file-list" id="fileListWrap" hidden><span>불러온 파일</span><select id="fileList"></select></label>
       <p class="note">예시 파일 내려받기(모두 가상 데이터):
         <a href="samples/예시데이터_TestlabNeo형식.csv" download>Testlab Neo 형식</a> ·
         <a href="samples/예시데이터_세로형.csv" download>세로형</a> ·
@@ -120,6 +124,8 @@
         <label class="field"><span>대역 끝 (빈칸 = 끝까지)</span><input name="energyHi" inputmode="decimal"></label>
         <p class="note span-all">피크 목록과 대역 에너지 합산은 제출자 분석기에는 없고 이 도구가 더한 것입니다. 값은 선형 진폭(소음은 Pa)입니다.</p>
         <div class="submit-bar span-all">
+          <label class="check-inline live-check"><input type="checkbox" id="liveCalc"> 설정을 바꾸면 바로 다시 계산</label>
+          <span id="liveStatus" class="note live-status" role="status" aria-live="polite"></span>
           <button type="button" class="btn" id="resetSettingsBtn">처음 값으로</button>
           <button type="submit" class="btn btn-primary btn-big">다시 계산</button>
         </div>
@@ -134,6 +140,7 @@
         </div>
         <div id="summary" class="summary"></div>
         <div class="btn-row save-row">
+          <button type="button" class="btn btn-primary" data-save="xlsx">XLSX 통합 문서</button>
           <button type="button" class="btn" data-save="track">오더 추적 CSV</button>
           <button type="button" class="btn" data-save="rss">오더 RSS 합산 CSV</button>
           <button type="button" class="btn" data-save="ordermax">오더별 최대 CSV</button>
@@ -141,15 +148,23 @@
           <button type="button" class="btn" data-save="energy">에너지 합산 CSV</button>
           <button type="button" class="btn" data-save="log">경고 로그 CSV</button>
         </div>
-        <p class="note">CSV 는 모든 채널·방향을 담습니다. 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM)으로 저장합니다.</p>
+        <p class="note">XLSX 는 제출자 분석기 v34 와 같은 시트(Settings · Order Analysis · Order RSS Sum)에 오더별 최대 · 피크 목록 · 에너지 합산 · 경고 로그 시트를 더한 한 파일입니다. CSV 는 표 하나씩, 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM)으로 저장합니다. 모두 모든 채널·방향을 담습니다.</p>
       </div>
 
       <div class="card">
         <h3>오더별 RPM-진폭 그래프</h3>
+        <div class="form-grid cols-4 axis-range" id="lineRange">
+          <label class="field"><span>RPM 최소</span><input id="lineXLo" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span>RPM 최대</span><input id="lineXHi" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span id="lineYLoLabel">진폭 최소</span><input id="lineYLo" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span id="lineYHiLabel">진폭 최대</span><input id="lineYHi" type="number" step="any" placeholder="자동"></label>
+        </div>
+        <div class="btn-row range-row"><button type="button" class="btn" id="lineAuto">자동 범위로</button><span class="note">빈칸은 자동입니다. 최소가 최대보다 크면 자동 범위로 그립니다.</span></div>
         <div class="chart-wrap" id="lineWrap">
           <svg id="lineChart" class="chart" role="img" aria-label="오더별 RPM-진폭 그래프"></svg>
           <div class="tip" id="lineTip" hidden></div>
         </div>
+        <button type="button" class="resize-handle" id="lineResize" data-kind="line" aria-label="그래프 높이 조절 — 끌거나 위·아래 화살표, 두 번 누르면 기본 높이">↕ 끌어서 높이 조절 <span class="note" id="lineHText"></span></button>
         <div class="legend" id="lineLegend"></div>
         <p class="note">속이 빈 빨간 점은 「불일치」(이론 주파수가 측정 범위 밖)입니다. 점선은 오더 RSS 합산입니다.</p>
         <details class="overlay-box">
@@ -168,16 +183,20 @@
             <label class="check-inline"><input type="checkbox" id="showOrders" checked> 오더 선 표시</label>
           </div>
         </div>
-        <div class="form-grid cols-4 map-range">
+        <div class="form-grid cols-3 map-range">
           <label class="field"><span id="mapLoLabel">가로축 최소 (Hz)</span><input id="mapLo" type="number" step="any" placeholder="자동"></label>
           <label class="field"><span id="mapHiLabel">가로축 최대 (Hz)</span><input id="mapHi" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span>RPM 최소</span><input id="mapRLo" type="number" step="any" placeholder="자동"></label>
+          <label class="field"><span>RPM 최대</span><input id="mapRHi" type="number" step="any" placeholder="자동"></label>
           <label class="field"><span>색 범위 최소</span><input id="mapCMin" type="number" step="any" placeholder="자동"></label>
           <label class="field"><span>색 범위 최대</span><input id="mapCMax" type="number" step="any" placeholder="자동"></label>
         </div>
+        <div class="btn-row range-row"><button type="button" class="btn" id="mapAuto">자동 범위로</button></div>
         <div class="chart-wrap" id="mapWrap">
           <canvas id="colorMap" class="chart" aria-label="RPM × 주파수 스펙트럼 컬러맵"></canvas>
           <div class="tip" id="mapTip" hidden></div>
         </div>
+        <button type="button" class="resize-handle" id="mapResize" data-kind="map" aria-label="컬러맵 높이 조절 — 끌거나 위·아래 화살표, 두 번 누르면 기본 높이">↕ 끌어서 높이 조절 <span class="note" id="mapHText"></span></button>
         <div class="scale" id="mapScale"></div>
         <p class="note">마우스를 올리거나 눌러 보면 RPM·주파수·오더·진폭이 나오고, 오더 선 가까이에서는 그 오더의 검출 피크가 나옵니다. 흰 동그라미가 RPM 별 피크, 점선이 추적 오더입니다. 빈칸은 자동 범위입니다.</p>
       </div>
@@ -198,7 +217,7 @@
   </main>
 
   <footer class="site-footer">
-    <div class="inner">1단계 · 데이터는 이 브라우저 안에서만 처리합니다 · 오더 계산은 제출자 분석기 v34 와 같은 식입니다</div>
+    <div class="inner">데이터는 이 브라우저 안에서만 처리합니다 · 오더 계산은 제출자 분석기 v34 와 같은 식입니다</div>
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

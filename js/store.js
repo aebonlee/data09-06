@@ -4,6 +4,7 @@
   'use strict';
   var KEY_SETTINGS = 'data09-06.settings';
   var KEY_IMPORT = 'data09-06.import';
+  var KEY_VIEW = 'data09-06.view';   // 화면 설정(그래프 높이·즉시 다시 계산)
   var memory = {};
   var ok = true;
   function get(k) {
@@ -22,7 +23,9 @@
     // 마지막으로 쓴 가져오기 설정(구분자·머리행·배치·열 매핑·고정값)
     getImport: function () { return getJson(KEY_IMPORT); },
     setImport: function (c) { set(KEY_IMPORT, JSON.stringify(c)); },
-    clear: function () { del(KEY_SETTINGS); del(KEY_IMPORT); },
+    getView: function () { return getJson(KEY_VIEW) || {}; },
+    setView: function (patch) { var v = getJson(KEY_VIEW) || {}; Object.keys(patch).forEach(function (k) { v[k] = patch[k]; }); set(KEY_VIEW, JSON.stringify(v)); },
+    clear: function () { del(KEY_SETTINGS); del(KEY_IMPORT); del(KEY_VIEW); },
     available: function () { get(KEY_SETTINGS); return ok; }
   };
 })(window);
