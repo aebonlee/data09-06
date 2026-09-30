@@ -947,7 +947,7 @@
   function withXlsx(done) {
     if (window.XLSX) { done(window.XLSX); return; }
     var sc = document.createElement('script');
-    sc.src = 'vendor/xlsx.full.min.js';
+    sc.src = '../vendor/xlsx.full.min.js';
     sc.onload = function () { if (window.XLSX) done(window.XLSX); else toast('XLSX 라이브러리를 불러오지 못했습니다', true); };
     sc.onerror = function () { toast('XLSX 라이브러리(vendor/xlsx.full.min.js)를 불러오지 못했습니다 — CSV 로 저장하세요', true); };
     document.head.appendChild(sc);

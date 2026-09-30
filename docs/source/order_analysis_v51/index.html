@@ -4,10 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Order Analysis v51 - Overall · Order Contribution</title>
-  <meta name="description" content="지게차 소음·진동 CSV 오더 분석 — Overall · 오더 진폭 · 차수별 기여도 · Spectrum Map (data09-06 수강생 과제)" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230b2d4d%22/%3E%3Cpath d=%22M6 26 L12 6 M6 26 L20 6 M6 26 L28 12%22 stroke=%22%23f2b01e%22 stroke-width=%222.5%22 stroke-linecap=%22round%22/%3E%3Ccircle cx=%226%22 cy=%2226%22 r=%222.5%22 fill=%22%237fe3ff%22/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css" />
-  <link rel="stylesheet" href="css/hero.css" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <header>
@@ -15,135 +12,6 @@
     <div class="header-copy"><h1>Order Analysis</h1><p>CSV 기반 오더 및 컬러맵 분석</p><div id="analyzerVersion" class="analyzer-version"></div></div>
     <button id="themeToggle" class="theme-toggle secondary" type="button" aria-label="다크모드 전환">🌙 다크모드</button>
   </div>
-
-<section class="hero" id="hero" aria-labelledby="heroTitle">
-  <div class="hero-inner">
-    <div class="hero-copy">
-      <p class="hero-eyebrow">전동 지게차 소음 · 진동 오더 분석</p>
-      <h2 id="heroTitle" class="hero-title">RPM 마다 어느 오더가 <br>소리와 떨림을 키우는지 한눈에</h2>
-      <p class="hero-lead">Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 Overall · 오더 진폭 · 차수별 기여도 · Spectrum Map 을 이 브라우저 안에서 계산합니다.</p>
-      <ol class="hero-steps">
-        <li><span class="hero-step-no">1</span><span>CSV 올리기</span></li>
-        <li><span class="hero-step-no">2</span><span>인식 확인 → 분석 실행</span></li>
-        <li><span class="hero-step-no">3</span><span>그래프 확인 · XLSX 저장</span></li>
-      </ol>
-      <div class="hero-actions">
-        <button id="heroPickCsv" class="hero-btn hero-btn-primary" type="button">CSV 파일 선택</button>
-        <a class="hero-btn hero-btn-ghost" href="samples/예시데이터_TestlabNeo형식.csv" download>예시 CSV 받기</a>
-      </div>
-      <p class="hero-note">파일은 서버로 보내지 않습니다. 예시 CSV 는 1,000~1,800 Hz 구간의 가상 값이라 오더 입력에 30, 36, 42 를 넣어 보세요.</p>
-      <p class="hero-note hero-classic">피크 목록 · 대역 에너지 합산 · 세로형 · 가로형 CSV · 경고 로그가 필요하면 <a href="classic/">이전 도구(v34 · v40 기준 재구성판)</a>를 쓰세요.</p>
-    </div>
-
-    <figure class="hero-figure">
-      <div id="heroVisual" class="hero-visual">
-        <canvas id="heroCanvas" role="img" aria-label="전동 지게차 그림(좌석 아래 배터리, 앞 차축 옆 구동 모터 · 기어박스에 가속도 센서)과 가상의 캠벨 선도. 가로축 주파수(Hz), 세로축 RPM, 1차·2차·4차·6차 오더 선과 공진 띠가 색 등고선으로 그려져 있고 RPM 커서가 위아래로 움직입니다."></canvas>
-        <svg id="heroForklift" class="hero-forklift" viewBox="0 0 360 240" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="hfBody" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#ffc94a"/><stop offset="1" stop-color="#e79b0c"/>
-            </linearGradient>
-            <linearGradient id="hfWeight" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#f4b021"/><stop offset="1" stop-color="#b87306"/>
-            </linearGradient>
-            <linearGradient id="hfMast" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stop-color="#4b5866"/><stop offset=".5" stop-color="#7d8b99"/><stop offset="1" stop-color="#3b4652"/>
-            </linearGradient>
-            <radialGradient id="hfTire" cx=".5" cy=".5" r=".5">
-              <stop offset=".62" stop-color="#2b333c"/><stop offset=".63" stop-color="#1a2027"/><stop offset="1" stop-color="#11161b"/>
-            </radialGradient>
-            <pattern id="hfStripe" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-              <rect width="14" height="14" fill="#f4b021"/><rect width="7" height="14" fill="#1d242c"/>
-            </pattern>
-          </defs>
-          <ellipse cx="190" cy="226" rx="170" ry="7" fill="#04101d" opacity=".45"/>
-          <g id="heroForkliftBody">
-            <!-- 마스트(뒤 레일) · 체인 -->
-            <rect x="92" y="22" width="12" height="186" rx="2" fill="#39434e"/>
-            <rect x="80" y="30" width="14" height="178" rx="2" fill="url(#hfMast)"/>
-            <rect x="78" y="24" width="30" height="8" rx="2" fill="#2e3740"/>
-            <line x1="100" y1="34" x2="100" y2="150" stroke="#9aa7b4" stroke-width="2" stroke-dasharray="3 2"/>
-            <!-- 캐리지 · 백레스트 -->
-            <rect x="58" y="128" width="26" height="64" rx="2" fill="#2e3740"/>
-            <g stroke="#56636f" stroke-width="3">
-              <line x1="61" y1="134" x2="81" y2="134"/><line x1="61" y1="148" x2="81" y2="148"/><line x1="61" y1="162" x2="81" y2="162"/>
-            </g>
-            <!-- 포크 -->
-            <path d="M58 150 h8 v52 h-8 z" fill="#1f262e"/>
-            <path d="M6 202 L64 200 L66 208 L6 208 Q2 208 2 205 Q2 202 6 202 Z" fill="#26303a"/>
-            <!-- 팔레트 짐 -->
-            <g>
-              <rect x="10" y="190" width="46" height="10" rx="1.5" fill="#9c6b3c"/>
-              <rect x="10" y="186" width="46" height="4" fill="#b98550"/>
-              <rect x="12" y="152" width="42" height="34" rx="2" fill="#c7d3de"/>
-              <path d="M12 164 h42 M33 152 v34" stroke="#93a3b3" stroke-width="1.5"/>
-            </g>
-            <!-- 오버헤드 가드 -->
-            <path d="M140 146 L152 58" stroke="#232b33" stroke-width="7" stroke-linecap="round"/>
-            <path d="M252 118 L252 58" stroke="#232b33" stroke-width="7" stroke-linecap="round"/>
-            <rect x="140" y="50" width="122" height="10" rx="4" fill="#232b33"/>
-            <path d="M156 55 h96" stroke="#3a4550" stroke-width="2"/>
-            <circle cx="149" cy="78" r="4.5" fill="#fff4c2" stroke="#232b33" stroke-width="2"/>
-            <!-- 차체 -->
-            <path d="M106 196 L106 150 Q106 142 114 141 L176 138 L200 114 Q204 110 210 110 L262 110 L262 196 Z" fill="url(#hfBody)"/>
-            <path d="M106 176 L262 176 L262 196 L106 196 Z" fill="#c98309"/>
-            <!-- 카운터웨이트 -->
-            <path d="M246 104 Q300 100 318 128 Q328 150 324 178 Q322 196 300 198 L246 198 Z" fill="url(#hfWeight)"/>
-            <path d="M300 128 Q316 150 312 190" stroke="#8a5705" stroke-width="3" fill="none" opacity=".55"/>
-            <rect x="258" y="186" width="52" height="10" rx="2" fill="url(#hfStripe)"/>
-            <!-- 충전구(전동식 — 배기관 없음) -->
-            <rect x="290" y="132" width="16" height="22" rx="3" fill="#8a5705"/>
-            <rect x="292.5" y="134.5" width="11" height="17" rx="2" fill="#232b33"/>
-            <path d="M299.5 137 L295.5 144 L298.4 144 L297 150 L301.8 142.4 L298.9 142.4 Z" fill="#7fe3ff"/>
-            <!-- 좌석 · 핸들 -->
-            <path d="M212 110 Q212 84 226 80 L236 80 Q242 82 240 90 L232 110 Z" fill="#232b33"/>
-            <rect x="200" y="104" width="40" height="8" rx="3" fill="#232b33"/>
-            <path d="M176 138 L186 100" stroke="#232b33" stroke-width="4" stroke-linecap="round"/>
-            <ellipse cx="188" cy="98" rx="11" ry="3.5" fill="none" stroke="#232b33" stroke-width="3" transform="rotate(-18 188 98)"/>
-            <!-- 좌석 아래 배터리 칸(덮개를 걷어 낸 모습) -->
-            <rect x="196" y="116" width="54" height="56" rx="3" fill="#1b242d"/>
-            <rect x="200" y="120" width="46" height="48" rx="2" fill="#2d6a4f"/>
-            <g fill="#3f8f6a" stroke="#1b4332" stroke-width="1">
-              <rect x="202.5" y="123" width="13" height="20" rx="1.5"/><rect x="216.5" y="123" width="13" height="20" rx="1.5"/><rect x="230.5" y="123" width="13" height="20" rx="1.5"/>
-              <rect x="202.5" y="145" width="13" height="20" rx="1.5"/><rect x="216.5" y="145" width="13" height="20" rx="1.5"/><rect x="230.5" y="145" width="13" height="20" rx="1.5"/>
-            </g>
-            <g fill="#cfe9dc"><rect x="207" y="121" width="4" height="3"/><rect x="221" y="121" width="4" height="3"/><rect x="235" y="121" width="4" height="3"/></g>
-            <path d="M224 129 L216 145 L222.5 145 L219.5 158 L230.5 140.5 L224 140.5 L227.5 129 Z" fill="#ffd166" stroke="#1b242d" stroke-width="1.2" stroke-linejoin="round"/>
-            <!-- 모터실 — 앞(구동) 차축 옆 -->
-            <rect x="158" y="160" width="46" height="36" rx="4" fill="#1b242d" opacity=".85"/>
-            <!-- 배터리 → 구동 모터 전원 케이블 -->
-            <path d="M204 170 C 204 178, 200 180, 196 180" stroke="#f77f00" stroke-width="3.2" fill="none" stroke-linecap="round"/>
-            <!-- 바퀴 -->
-            <circle cx="132" cy="196" r="31" fill="#10161c" opacity=".55"/>
-            <circle cx="132" cy="196" r="27" fill="url(#hfTire)"/>
-            <circle cx="132" cy="196" r="11" fill="#9aa6b2"/><circle cx="132" cy="196" r="4" fill="#4b5866"/>
-            <circle cx="276" cy="200" r="26" fill="#10161c" opacity=".55"/>
-            <circle cx="276" cy="200" r="22" fill="url(#hfTire)"/>
-            <circle cx="276" cy="200" r="9" fill="#9aa6b2"/><circle cx="276" cy="200" r="3.5" fill="#4b5866"/>
-            <!-- 감속 기어박스(차축 허브 ↔ 모터) · 구동 모터 -->
-            <path d="M136 190 L160 184 L160 202 L136 200 Z" fill="#56636f"/>
-            <rect x="156" y="180" width="12" height="24" rx="3" fill="#6b7885" stroke="#2e3740" stroke-width="1.2"/>
-            <rect x="166" y="170" width="30" height="24" rx="6" fill="url(#hfMast)" stroke="#2e3740" stroke-width="1.2"/>
-            <g stroke="#2e3740" stroke-width="1.4" opacity=".8">
-              <line x1="172" y1="172" x2="172" y2="192"/><line x1="177" y1="172" x2="177" y2="192"/><line x1="182" y1="172" x2="182" y2="192"/><line x1="187" y1="172" x2="187" y2="192"/><line x1="192" y1="172" x2="192" y2="192"/>
-            </g>
-            <circle cx="162" cy="192" r="2" fill="#2e3740"/>
-          </g>
-          <!-- 가속도 센서(구동 모터 · 기어박스) · 물결 · 케이블(그래프로) -->
-          <path d="M176 172 C 192 180, 216 184, 256 180 C 292 176, 326 150, 360 138" stroke="#7fe3ff" stroke-width="1.6" fill="none" stroke-dasharray="4 3" opacity=".9"/>
-          <circle class="hero-ripple" cx="170" cy="170" r="8" fill="none" stroke="#7fe3ff" stroke-width="1.5" opacity=".5"/>
-          <circle class="hero-ripple" cx="170" cy="170" r="14" fill="none" stroke="#7fe3ff" stroke-width="1.5" opacity=".3"/>
-          <circle class="hero-ripple" cx="170" cy="170" r="20" fill="none" stroke="#7fe3ff" stroke-width="1.5" opacity=".15"/>
-          <rect id="heroSensor" x="164" y="164" width="12" height="12" rx="2.5" fill="#0d2a44" stroke="#7fe3ff" stroke-width="2"/>
-        </svg>
-      </div>
-      <figcaption class="hero-caption">
-        <span id="heroReadout" class="hero-readout" aria-live="off">RPM 2,350</span>
-        <span class="hero-caption-note">그림은 가상의 캠벨 선도(Campbell diagram)입니다 — 실제 시험값이 아닙니다. 전동 지게차 구동 모터 · 기어박스의 가속도 센서를 가정했고, 점선 = 오더(N × RPM ÷ 60), 세로로 옅게 번진 띠 = 구조 공진이며 오더 · 공진 48 · 118 · 196 Hz 는 임의로 정한 가상 값입니다.</span>
-      </figcaption>
-    </figure>
-  </div>
-</section>
 </header>
 
 <main>
@@ -600,7 +468,6 @@ Order 축에서는 정수 오더 눈금과 선택한 분석 오더 성분 가이
 <footer>
   이 화면은 이론 오더 주파수 주변의 시험 피크를 탐색하고 두 주파수의 일치 여부를 판정. 진동 스펙트럼 그래프는 포함하지 않음.
 </footer>
-<script src="js/script.js"></script>
-<script src="js/hero.js"></script>
+<script src="script.js"></script>
 </body>
 </html>

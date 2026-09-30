@@ -1,32 +1,74 @@
-# data09-06 · 소음진동 오더 분석 도구
+# data09-06 · 소음진동 오더 분석 도구 (Order Analysis v51)
 
-Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 분석·시각화까지 한 번에 끝내는 도구
+Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 RPM 별 오더 진폭 · Overall · 차수별 기여도 · Spectrum Map 을 브라우저 안에서 계산하는 제출자 분석기 v51 에 전동 지게차 그림과 가상 캠벨 선도 컨투어 첫 화면을 더한 도구
 
 | 항목 | 내용 |
 |---|---|
 | 제출자 | 조윤제 |
 | 과정 | 현장 데이터 수집·디지털화 전문가과정 1차수 (2026) |
-| 진행 단계 | 1단계 개발 완료 (2026-09-28) · 2차 — 제출자 분석기 v34·실제 Testlab Neo 파일 반영 · 3차(2026-09-29) — v34 의 XLSX 저장·축 범위·높이 조절·끌어 놓기·즉시 다시 계산 · 4차(2026-09-30) — 분석기 v40 기준 RPM 별 Overall·오더 기여도(그래프·표시 옵션·XLSX 시트) — https://aebonlee.github.io/data09-06/ |
-| 다음 개발 | 2단계 — 다크 모드, 여러 시험 비교(한 그래프에 겹치기) |
+| 진행 단계 | 1단계 개발 완료 (2026-09-28) · 2차 — 제출자 분석기 v34·실제 Testlab Neo 파일 반영 · 3차(2026-09-29) — v34 의 XLSX 저장·축 범위·높이 조절·끌어 놓기·즉시 다시 계산 · 4차(2026-09-30) — 분석기 v40 기준 RPM 별 Overall·오더 기여도(그래프·표시 옵션·XLSX 시트) · 5차(2026-09-30) — data09-29(제출자 분석기 v51 + 전동 지게차 첫 화면) 통합, 두 번째 CSV 채널 오류 수정 — https://aebonlee.github.io/data09-06/ |
+| 다음 개발 | 여러 시험 비교(한 그래프에 겹치기), 원하면 분석 뒤 첫 화면을 올린 CSV 의 실제 Spectrum Map 으로 |
+
+> **2026-09-30 통합** — 따로 만들었던 [data09-29](https://github.com/aebonlee/data09-29)(분석기 v51 + 지게차 첫 화면)를 제출자 답변 「06번 분석기의 업데이트 버전이므로 합쳐도 좋습니다. 전동식이 좋으며, 자주 보는 오더/공진주파수는 따로 없으므로 임의로 지정해도 좋습니다. 에러가 발생한다면 수정 부탁드립니다.」에 따라 이 리포로 합쳤습니다.
+> - 첫 화면(`index.html`) = **제출자 분석기 v51** + 전동 지게차 그림(좌석 아래 배터리 · 앞 차축 옆 구동 모터 · 기어박스에 가속도 센서) + 가상 캠벨 선도. 오더 · 공진 값은 임의로 정한 **가상 값**입니다.
+> - v51 에 없는 기능(RPM 별 피크 목록 · 대역 에너지 합산 · 세로형/가로형 CSV · 경고 로그 · 여러 파일 목록 · CSV 저장)은 **이전 도구 `classic/`**(v34 · v40 기준 재구성판)에 그대로 둡니다 — https://aebonlee.github.io/data09-06/classic/
+> - 제출자 코드는 오류 한 곳만 고쳤습니다(분석한 뒤 채널 이름이 다른 CSV 를 열면 나던 `channelType` 오류 — 개발일지 5차).
 
 ## 이 저장소 이용 안내
 
 이 저장소는 수강생 본인의 과제입니다. **Fork 하거나 「Code → Download ZIP」으로 받아 가셔도 됩니다.**
 강의 종료 후 일정 기간이 지나면 비공개로 전환되니, 계속 쓰실 분은 그 전에 받아 두세요.
 
+## 실행 방법 — 분석기 v51 (첫 화면)
+
+**온라인에서 바로 쓰기: https://aebonlee.github.io/data09-06/**
+
+내 PC 에서: [전체 파일 ZIP](https://github.com/aebonlee/data09-06/archive/refs/heads/main.zip) 을 받아 풀고 `index.html` 을 더블클릭(크롬 · 엣지). 설치 · 인터넷 연결이 필요 없습니다. CSV 는 서버로 가지 않고 브라우저 안에서만 읽습니다.
+
+1. 첫 화면의 **「CSV 파일 선택」** 또는 아래 업로드 칸에 Testlab Neo CSV 를 끌어 놓기
+2. 인식 신호등 · Curve 표를 확인하고 **「분석 실행」**
+3. 채널 · 오더(예: `1, 2, 4`)를 고르면 Order Analysis 그래프, 「차수별 기여도 분석」을 펼치면 기여도, 아래 Spectrum Map
+4. **「Order Analysis XLSX 저장」** — Settings · Order Analysis · Order RSS Sum · Order Contribution 시트
+
+예시로 해 보기: 첫 화면의 「예시 CSV 받기」(가상 값, 1,000~1,800 Hz · 2,000~2,400 RPM) → 올린 뒤 오더 입력에 `30, 36, 42` 를 넣으면 기여도까지 5개 RPM 이 모두 나옵니다.
+
+| 부분 | 하는 일 |
+|---|---|
+| 첫 화면 | 전동 지게차 옆모습(SVG — 배터리 칸 · 구동 모터 · 감속 기어박스 · 충전구, 배기관 없음) + 모터 · 기어박스 센서 둘레 소음 등고선, 가상 캠벨 선도(가로 Frequency (Hz) · 세로 RPM, 색 띠 등고선, 1 · 2 · 4 · 6차 오더 선, 공진 띠). RPM 커서가 오르내리며 가장 큰 성분을 읽어 주고 그만큼 지게차가 떨림. 「동작 줄이기」 설정이면 멈춘 그림, 화면 밖 · 탭 숨김이면 멈춤. **그림은 가상 값입니다** |
+| CSV 파일 업로드 | 인코딩 자동(UTF-8 · CP949), 메타데이터에서 RPM · 위치 · 방향 · 소음/진동 구분, 인식 신호등 · Curve 표 |
+| Order Analysis | 채널 · 오더 · 피크 검색/합산 범위, 오더 진폭 · RSS · Overall 그래프, 단위(Amplitude · dB · dBA)와 dB 기준값 |
+| 차수별 기여도 분석 | 기여도(%) = Aᵢ² ÷ Overall² × 100, 요약 · 차트 · 표 |
+| Spectrum Map | 주파수(또는 오더) × RPM 컬러맵, 오더 선 겹치기, 축 · 색 범위 |
+
+## 파일
+
+- `index.html` · `js/script.js` · `css/style.css` — **제출자 분석기 v51**(원본은 `docs/source/order_analysis_v51/`, 바뀐 곳은 `script.js` 오류 수정 한 줄)
+- `js/hero.js` · `css/hero.css` — 첫 화면 그림 · 움직임(분석 코드와 서로 건드리지 않음)
+- `classic/` — 이전 도구(v34 · v40 기준 재구성판: `classic/index.html` · `classic/js/logic.js` · `app.js` · `sample-data.js` · `store.js` · `classic/css/style.css`). XLSX 는 `vendor/` 의 SheetJS
+- `samples/` — 가상 예시 CSV 4종 · `test/fixtures/` — 가상 고정 파일
+- `supabase/` · `scripts/sqltest/` — 이전 도구용 DB 스크립트(선택)
+
+## 개발 · 검증
+
+- `node test/all.mjs` (의존성 없음) = `test/analyzer.test.mjs`(v51 · 첫 화면 · 오류 회귀) + `test/classic.test.mjs`(이전 도구 · v34/v40 대조)
+- 브라우저 회귀(선택): `PW_CORE=<playwright-core 경로> CHROME=<크롬> node test/browser-second-csv.mjs` — 첫 CSV 분석 → 채널 이름이 다른 둘째 CSV → 콘솔 오류 0
+
 ## 문서
 
 - [프로젝트 기획서 (Markdown)](docs/01_프로젝트_기획서.md)
 - [프로젝트 기획서 (Word, docx)](docs/01_프로젝트_기획서.docx)
-- [패들릿 제출 원문](docs/source/패들릿_제출_원문.md)
-- [DB 스크립트 (Supabase)](supabase/README.md) — 브라우저 저장 대신 DB 를 쓸 때. 수강생 본인 Supabase 프로젝트에 적용
+- [패들릿 제출 원문](docs/source/패들릿_제출_원문.md) · [v51 접수 원문(구 data09-29)](docs/source/2026-09-30_패들릿_접수원문_v51.md)
+- [개발일지](docs/개발일지.md)
+- [DB 스크립트 (Supabase)](supabase/README.md) — 이전 도구에서 브라우저 저장 대신 DB 를 쓸 때. 수강생 본인 Supabase 프로젝트에 적용
 
 ## 제출 자료 (`docs/source/`)
+
+- `order_analysis_v51/` — 제출자 분석기 v51 (2026-09-30 패들릿 첨부, 받은 그대로). **첫 화면 분석기의 원본**
 
 - `order_analysis_v34.html` — 제출자 분석기 v34 (2026-09-28 드라이브 공유). **이 도구의 계산 기준**
 - `order_analysis_v40.html` — 제출자 분석기 v40 (2026-09-30). 계산 함수는 v34 와 같고 화면(CSV 인식 신호등·Spectrum Map 오더 축·MAX)이 바뀜
 - `2026-09-30_패들릿_추가요청.md` — v40 기반 Overall·기여도 요청 원문
-- (제출자 실제 Testlab 파일 2종 — 회사 시험 자료라 리포에서 삭제(2026-09-30). 검증 결과만 기록. 테스트는 파일을 가진 사람만 `REAL_TESTLAB_DIR=<폴더> node test/logic.test.mjs` 로 돌리고, 없으면 건너뜁니다. 리포에는 가상 값 `samples/예시데이터_TestlabNeo형식.csv` · `test/fixtures/testlab-closed-rpm.csv` 만 둡니다)
+- (제출자 실제 Testlab 파일 2종 — 회사 시험 자료라 리포에서 삭제(2026-09-30). 검증 결과만 기록. 테스트는 파일을 가진 사람만 `REAL_TESTLAB_DIR=<폴더> node test/classic.test.mjs` 로 돌리고, 없으면 건너뜁니다. 리포에는 가상 값 `samples/예시데이터_TestlabNeo형식.csv` · `test/fixtures/testlab-closed-rpm.csv` 만 둡니다)
 - `패들릿_제출_원문.md` — 게시물·댓글 원문
 
 ## 진행 순서
@@ -35,14 +77,14 @@ Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 분석·시각
 2. 1단계 개발 — 지금 있는 자료로 만들 수 있는 부분부터
 3. 수강생 실제 데이터로 검증 · 보완
 
-## 실행 방법
+## 이전 도구 (`classic/`) — v34 · v40 기준 재구성판
 
-**온라인에서 바로 쓰기: https://aebonlee.github.io/data09-06/**
+**온라인: https://aebonlee.github.io/data09-06/classic/** (2026-09-30 통합 전까지 이 리포의 첫 화면이었던 도구)
 
 내 PC에서 쓰려면 설치 없이 아래 두 방법 중 하나로 엽니다.
 
-1. **파일로 바로 열기** — 이 폴더의 `index.html` 을 더블클릭해 크롬·엣지로 엽니다. 인터넷이 없어도 동작합니다(XLSX 쓰기용 SheetJS 도 `vendor/` 에 들어 있어 밖에서 받지 않습니다).
-2. **간이 서버로 열기** — 폴더에서 `python3 -m http.server 8000` 을 실행하고 브라우저에서 `http://localhost:8000` 을 엽니다.
+1. **파일로 바로 열기** — `classic/index.html` 을 더블클릭해 크롬·엣지로 엽니다. 인터넷이 없어도 동작합니다(XLSX 쓰기용 SheetJS 도 `vendor/` 에 들어 있어 밖에서 받지 않습니다).
+2. **간이 서버로 열기** — 폴더에서 `python3 -m http.server 8000` 을 실행하고 브라우저에서 `http://localhost:8000/classic/` 을 엽니다.
 
 쓰는 순서: **1. 불러오기**(CSV 선택 또는 화면에 끌어 놓기, 여러 개 가능) → **2. 열 맞추기**(Testlab Neo 내보내기는 자동 — Curve 목록만 확인) → **3. 분석 설정**(추적 오더·피크 검색/합산 범위·소음/진동 표시 단위·피크·에너지 대역) → **4. 결과**(그래프·컬러맵·표, XLSX·CSV 저장) · **경고 로그**.
 
@@ -56,10 +98,10 @@ Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 분석·시각
 - 그래프·컬러맵 위의 **축 범위** 칸(빈칸 = 자동)으로 확대하고, 「자동 범위로」 로 되돌립니다. 그래프 아래 손잡이를 **끌어서 높이**를 바꾸며(위·아래 화살표 20px, 두 번 누르면 기본), 높이는 이 브라우저에 기억합니다.
 - 시험 데이터는 **이 브라우저 메모리에서만** 처리하며 어디로도 보내지 않습니다. 이 브라우저에는 분석 설정·마지막 열 매핑·화면 설정(그래프 높이, 즉시 다시 계산)만 기억합니다(시험 데이터는 저장하지 않음).
 - 예시 파일(모두 가상): `samples/예시데이터_TestlabNeo형식.csv`(실제 내보내기 배치) · `예시데이터_세로형.csv` · `예시데이터_가로형.csv` · `예시데이터_가로형_열RPM.csv`. 실제 파일 두 개는 200 KB 가 넘어 `docs/source/` 에만 둡니다.
-- 로직 테스트: `node test/logic.test.mjs` (설치 없음) — 실제 파일 2종을 읽고, 제출자 v34·v40 의 계산 함수(`docs/source/order_analysis_v34.html`·`_v40.html`)와 결과·XLSX 행을 맞대 보며, XLSX 는 `vendor/` 의 SheetJS 로 쓰고 다시 읽어 봅니다
+- 로직 테스트: `node test/classic.test.mjs` (설치 없음) — 실제 파일 2종을 읽고, 제출자 v34·v40 의 계산 함수(`docs/source/order_analysis_v34.html`·`_v40.html`)와 결과·XLSX 행을 맞대 보며, XLSX 는 `vendor/` 의 SheetJS 로 쓰고 다시 읽어 봅니다
 - 예시 파일 다시 만들기: `node scripts/make-samples.js`
 
-## 구현 범위
+## 구현 범위 (이전 도구 `classic/`)
 
 기획서 5장 기능 목록 기준입니다. 완료 = 지금 도구에 들어감, 다음 단계 = 기획서 8장 2단계. 「3차」 는 2026-09-29 에 v34 에서 옮겨 온 기능입니다.
 
@@ -83,7 +125,7 @@ Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 분석·시각
 | 설정 즉시 다시 계산 | 완료 (3차) | 0.3초 뒤 계산, 틀린 값은 계산하지 않고 이유 표시, 끌 수 있음(기억), 큰 파일(칸 150만 초과)·1초 넘는 계산은 저절로 끔 |
 | Overall · 오더 기여도 | 완료 (4차) | RPM 별 Overall 선(툴팁에 오더별 기여도), 기여도 누적 막대·표, 그래프 표시 옵션 체크(오더 RSS 합산·Overall·기여도 분석, 기억), Overall 범위 설정, XLSX 「기여도 분석」 시트·CSV, 합산 창 겹침·범위 밖 경고 |
 | v40 화면 기능 | 완료 (4차) | CSV 인식 신호등, 컬러맵 보이는 범위 최대값(MAX), 오더 축 정수 눈금·추적 오더 강조, Settings 시트 「Spectrum Map 가로축 기준」·「RSS 합산 그래프 표시」 |
-| 다크 모드 | 다음 단계 | v34 에 있음 — 계산과 무관 |
+| 다크 모드 | 첫 화면 v51 에 있음 | 이전 도구에는 없음(v51 분석기 · 첫 화면은 다크 모드 지원) |
 | 여러 시험 비교 | 다음 단계 | 2단계 |
 
 v34 와의 비교·계산 차이는 [개발일지 2차](docs/개발일지.md), v34 화면 기능을 옮긴 내용은 개발일지 3차에 정리했습니다.

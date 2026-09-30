@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const L = require('../js/logic.js');
-const Sample = require('../js/sample-data.js');
+const L = require('../classic/js/logic.js');
+const Sample = require('../classic/js/sample-data.js');
 
 let passed = 0;
 function test(name, fn) {

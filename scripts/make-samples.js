@@ -2,8 +2,8 @@
 // 앱의 「예시 데이터 불러오기」와 같은 생성기(js/sample-data.js)를 씁니다.
 const fs = require('fs');
 const path = require('path');
-const S = require('../js/sample-data.js');
-const L = require('../js/logic.js');
+const S = require('../classic/js/sample-data.js');
+const L = require('../classic/js/logic.js');
 const out = path.join(__dirname, '..', 'samples');
 fs.mkdirSync(out, { recursive: true });
 const files = { '예시데이터_세로형.csv': S.longCsv(), '예시데이터_가로형.csv': S.wideCsv(), '예시데이터_가로형_열RPM.csv': S.rpmColsCsv(), '예시데이터_TestlabNeo형식.csv': S.testlabCsv() };
