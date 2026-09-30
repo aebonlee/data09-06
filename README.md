@@ -26,7 +26,7 @@ Testlab Neo 에서 내보낸 주파수축 CSV를 올리면 오더 분석·시각
 - `order_analysis_v34.html` — 제출자 분석기 v34 (2026-09-28 드라이브 공유). **이 도구의 계산 기준**
 - `order_analysis_v40.html` — 제출자 분석기 v40 (2026-09-30). 계산 함수는 v34 와 같고 화면(CSV 인식 신호등·Spectrum Map 오더 축·MAX)이 바뀜
 - `2026-09-30_패들릿_추가요청.md` — v40 기반 Overall·기여도 요청 원문
-- `sim)130B-X 36,45order.csv` · `sim)30B-X 39order.csv` — Testlab Neo 실제 내보내기 예시 (각 436 KB · 773 KB)
+- (제출자 실제 Testlab 파일 2종 — 회사 시험 자료라 리포에서 삭제(2026-09-30). 검증 결과만 기록. 테스트는 파일을 가진 사람만 `REAL_TESTLAB_DIR=<폴더> node test/logic.test.mjs` 로 돌리고, 없으면 건너뜁니다. 리포에는 가상 값 `samples/예시데이터_TestlabNeo형식.csv` · `test/fixtures/testlab-closed-rpm.csv` 만 둡니다)
 - `패들릿_제출_원문.md` — 게시물·댓글 원문
 
 ## 진행 순서

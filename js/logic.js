@@ -171,7 +171,7 @@
   }
 
   // ── Testlab Neo 내보내기 (제출자 실제 파일·분석기 v34 기준) ─────────────
-  // 실제 파일 모양 (docs/source/sim)130B-X 36,45order.csv):
+  // 실제 파일 모양 (제출자 실제 Testlab 파일 2종 — 회사 시험 자료라 리포에서 삭제(2026-09-30). 검증 결과만 기록):
   //   1줄  Curve 1,,,,          ← 제목
   //   ...  Standard\All\Dataset name, rpm  2000, rpm  2000, …   ← 머리 정보 블록(열마다 Curve 하나)
   //        Standard\All\DOF id, LL:+X, LR:+X, …                ← 위치:방향
@@ -684,7 +684,7 @@
   }
   var CONTRIB_BASIS = { plain: '에너지(진폭²) 비율', weighted: 'A-가중 에너지 비율 (dBA 표시)' };
 
-  // 파일 이름에서 관심 오더 짐작: 「130B-X 36,45order.csv」 → "36, 45"  (제출자 파일 이름 관례)
+  // 파일 이름에서 관심 오더 짐작: 「sim)999X 36,45order.csv」 → "36, 45"  (제출자 파일 이름 관례)
   function ordersFromName(name) {
     var m = String(name || '').match(/(\d+(?:\.\d+)?(?:\s*[,&+]\s*\d+(?:\.\d+)?)*)\s*(?:order|차)/i);
     return m ? parseOrders(m[1].replace(/[&+]/g, ',')).join(', ') : '';

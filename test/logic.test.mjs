@@ -227,11 +227,29 @@ test('예시(가로형·열=RPM) — 배치 짐작과 읽기', () => {
 
 // ── 2026-09-28 2차: 제출자 분석기 v34·실제 Testlab Neo 파일 ──
 import fs from 'node:fs';
+import path from 'node:path';
 import { loadV34, v34Read, V34_PATH, V40_PATH, NAMES as V34_NAMES, extract as v34Extract } from './v34-harness.mjs';
-const SRC = new URL('../docs/source/', import.meta.url);
-const REAL = ['sim)130B-X 36,45order.csv', 'sim)30B-X 39order.csv'];
-const readSrc = f => fs.readFileSync(new URL(encodeURIComponent(f).replace(/%2C/g, ','), SRC), 'utf8');
 const readTl = text => { const rows = L.parseCsv(text, L.detectDelimiter(text)); return { rows, n: L.normalize(rows, { layout: 'testlab' }) }; };
+
+// 제출자 실제 Testlab 파일 2종 — 회사 시험 자료라 리포에서 삭제(2026-09-30). 검증 결과만 기록.
+// 파일을 가진 사람만 환경 변수로 폴더를 가리켜 돌립니다:  REAL_TESTLAB_DIR=/경로 node test/logic.test.mjs
+// 파일은 이름 끝(오더 표기)으로 찾습니다 — A = 「… 36,45order.csv」(진동 4위치 × 5 RPM), B = 「… 39order.csv」(소음 2 + 진동 4 × 10 RPM)
+const REAL_DIR = process.env.REAL_TESTLAB_DIR || '';
+const REAL = (() => {
+  if (!REAL_DIR || !fs.existsSync(REAL_DIR)) return null;
+  const names = fs.readdirSync(REAL_DIR);
+  const a = names.find(f => / 36,45order\.csv$/i.test(f)), b = names.find(f => / 39order\.csv$/i.test(f));
+  return a && b ? [a, b] : null;
+})();
+const readSrc = f => fs.readFileSync(path.join(REAL_DIR, f), 'utf8');
+let skipped = 0;
+function testReal(name, fn) {
+  if (REAL) return test(name, fn);
+  skipped++; console.log('  skip ' + name + ' — 실제 파일 없음 — 건너뜀');
+}
+// 합성 Testlab 2종: 예시(「rpm  2000」 이름, 진동 2 + 소음 1) · 고정 파일(「closed (…)RPM2000_Report to Excel」 이름, 소음 2 + 진동 2)
+const FIXTURE = fs.readFileSync(new URL('./fixtures/testlab-closed-rpm.csv', import.meta.url), 'utf8');
+const SYN = [['(합성 예시)', Sample.testlabCsv(), [36, 45]], ['(합성 고정 파일)', FIXTURE, [39]]];
 
 test('CSV 줄 번호 — 빈 줄·「,,,,」 줄을 빼도 원본 줄 번호 유지, 천 단위 쉼표', () => {
   const rows = L.parseCsv('a,b\n,,\n\n"1,234.5",2\n');
@@ -256,7 +274,7 @@ test('Testlab 판별·RPM 이름·척도·종류', () => {
   assert.equal(L.channelTypeOf('g', 'linear'), 'vibration');
   assert.equal(L.channelTypeOf('', 'db'), 'noise');
 });
-test('실제 파일 130B-X — 진동 4위치 × 5 RPM, 1000~2000 Hz, 데이터 64줄부터', () => {
+testReal('실제 파일 A(36·45차) — 진동 4위치 × 5 RPM, 1000~2000 Hz, 데이터 64줄부터', () => {
   const { rows, n } = readTl(readSrc(REAL[0]));
   assert.ok(L.isTestlab(rows));
   assert.deepEqual(n.groups.map(g => g.key), ['LL|X|vibration', 'LR|X|vibration', 'UL|X|vibration', 'UR|X|vibration']);
@@ -271,7 +289,7 @@ test('실제 파일 130B-X — 진동 4위치 × 5 RPM, 1000~2000 Hz, 데이터 
   assert.deepEqual(n.log.map(x => x.level), ['정보']);
   assert.equal(n.log[0].line, 64);
 });
-test('실제 파일 30B-X — 소음 2(dB 원본) + 진동 4 × 10 RPM, dB → Pa 변환', () => {
+testReal('실제 파일 B(39차) — 소음 2(dB 원본) + 진동 4 × 10 RPM, dB → Pa 변환', () => {
   const { n } = readTl(readSrc(REAL[1]));
   assert.deepEqual(n.groups.map(g => g.channel + '|' + g.direction), ['out|', 'Pump|', 'FLH botton|X', 'FLH up|X', 'RLH bottom|X', 'RLH up|X']);
   const out = n.groups[0];
@@ -305,6 +323,23 @@ test('합성 예시(Testlab 형식) — 실제 파일과 같은 배치로 읽힘
   assert.equal(n.groups[0].scale, 'db');
   assert.equal(n.groups[1].spectra.length, 5);
   assert.equal(n.log[0].line, 32);  // 「Curve 1」 제목부터 센 실제 데이터 시작 줄
+});
+test('합성 고정 파일(Testlab 형식) — 「closed (…)RPM2000_Report to Excel」 이름, 소음 2(dB 원본) + 진동 2, 끝 「,,,,」 줄', () => {
+  const { rows, n } = readTl(FIXTURE);
+  assert.ok(L.isTestlab(rows));
+  assert.deepEqual(n.groups.map(g => g.channel + '|' + g.direction), ['NoiseA|', 'NoiseB|', 'Mount front|X', 'Mount rear|X']);
+  for (const g of n.groups) { assert.deepEqual(g.spectra.map(s => s.rpm), [2000, 2100, 2200, 2300]); assert.equal(g.spectra[0].freqs.length, 241); }
+  const noise = n.groups[0];
+  assert.equal(noise.channelType, 'noise'); assert.equal(noise.unit, 'Pa'); assert.equal(noise.scale, 'db');
+  assert.equal(noise.spectra[0].amps[0], 24.810985);                    // 13줄, 원본 dB
+  const lin = L.linearize(n.groups, {}).groups[0];
+  close(lin.spectra[0].amps[0], 2e-5 * Math.pow(10, 24.810985 / 20), 1e-15);
+  assert.equal(L.linearize(n.groups, {}).groups[2], n.groups[2]);       // 선형 진동 채널은 그대로
+  assert.equal(n.groups[2].spectra[0].amps[0], 9.6e-5);                // 「9.60E-05」 지수 표기
+  assert.deepEqual(n.log.map(x => x.level), ['정보']);
+  assert.equal(n.log[0].line, 13);
+  assert.equal(L.cellCount(n.groups), 16 * 241);
+  assert.equal(L.recognitionSignal(n.log.filter(x => x.level !== '정보'), 16).level, 'green');
 });
 
 // 손 계산: sp600 (1X = 10 Hz), 주파수 5·8·10·12·20·30, 진폭 1·3·4·2·5·0.5
@@ -347,19 +382,17 @@ test('A-가중·표시 변환', () => {
   assert.equal(L.displayOf(0.3, 100, 'linear', 2e-5), 0.3);
 });
 test('파일 이름에서 관심 오더 짐작', () => {
-  assert.equal(L.ordersFromName('sim)130B-X 36,45order.csv'), '36, 45');
-  assert.equal(L.ordersFromName('sim)30B-X 39order.csv'), '39');
+  assert.equal(L.ordersFromName('sim)999X 36,45order.csv'), '36, 45');
+  assert.equal(L.ordersFromName('sim)888Y 39order.csv'), '39');
   assert.equal(L.ordersFromName('pump 2.5 & 5 order.csv'), '2.5, 5');
   assert.equal(L.ordersFromName('data.csv'), '');
 });
 
 // 같은 파일·같은 설정으로 제출자 분석기 v34 와 결과가 같은지 (모든 채널·RPM)
-test('v34 와 맞대기 — 실제 파일 2종 + 합성 예시, 단일 오더·RSS 합산·표시값', () => {
+function v34Compare(cases) {
   assert.ok(fs.existsSync(V34_PATH));
-  const cases = [[REAL[0], [36, 45]], [REAL[1], [30, 39]], ['(합성)', [36, 45]]];
   let compared = 0;
-  for (const [file, orders] of cases) {
-    const text = file === '(합성)' ? Sample.testlabCsv() : readSrc(file);
+  for (const [file, text, orders] of cases) {
     for (const [sw, uw, nMode] of [[1, 1, 'db'], [0, 0, 'linear'], [3, 2, 'dba']]) {
       const v = loadV34({ noiseAmplitudeMode: nMode, vibrationAmplitudeMode: nMode === 'dba' ? 'db' : 'linear' });
       const rep = v34Read(v, text, file);
@@ -400,16 +433,23 @@ test('v34 와 맞대기 — 실제 파일 2종 + 합성 예시, 단일 오더·R
       }
     }
   }
-  assert.ok(compared > 500, '비교 수 ' + compared);
+  return compared;
+}
+test('v34 와 맞대기 — 합성 2종(예시 36·45차 · 고정 파일 30·39차), 단일 오더·RSS 합산·표시값', () => {
+  const n = v34Compare([[SYN[0][0], SYN[0][1], [36, 45]], [SYN[1][0], SYN[1][1], [30, 39]]]);
+  assert.ok(n > 200, '비교 수 ' + n);
+});
+testReal('v34 와 맞대기 — 실제 파일 2종, 단일 오더·RSS 합산·표시값', () => {
+  const n = v34Compare([[REAL[0], readSrc(REAL[0]), [36, 45]], [REAL[1], readSrc(REAL[1]), [30, 39]]]);
+  assert.ok(n > 500, '비교 수 ' + n);
 });
 
 // ── 2026-09-29 3차: XLSX 저장·축 범위·그래프 높이·설정 검사 ──
-test('XLSX Order Analysis 시트 — v34 buildOrderAnalysisXlsxRows 와 같은 열·같은 값 (실제 파일 2종)', () => {
+function xlsxOaCompare(cases) {
   const HEAD = ['채널', '위치', '방향', '오더', 'RPM', 'Curve', '1X주파수_Hz', '이론오더주파수_Hz', '검출피크주파수_Hz', '주파수편차_Hz', '피크검색하한_Hz', '피크검색상한_Hz', '피크검색반폭_Hz',
     '합산하한_Hz', '합산상한_Hz', '합산반폭_Hz', '합산포인트수', '단일피크진폭', 'Order합산진폭', '표시진폭', '표시단위', '판정'];
   let compared = 0;
-  for (const [file, orders] of [[REAL[0], [36, 45]], [REAL[1], [39]]]) {
-    const text = readSrc(file);
+  for (const [file, text, orders] of cases) {
     const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' });
     const rep = v34Read(v, text, file);
     const settings = { orders: orders.join(','), searchHz: 1, sumHz: 1, noiseMode: 'db', vibMode: 'linear' };
@@ -440,13 +480,18 @@ test('XLSX Order Analysis 시트 — v34 buildOrderAnalysisXlsxRows 와 같은 �
     }
     assert.equal(r, rows.length, file + ' 행 수');
   }
-  assert.ok(compared > 50, '비교 행 ' + compared);
+  return compared;
+}
+test('XLSX Order Analysis 시트 — v34 buildOrderAnalysisXlsxRows 와 같은 열·같은 값 (합성 2종)', () => {
+  assert.ok(xlsxOaCompare(SYN) > 30);
+});
+testReal('XLSX Order Analysis 시트 — v34 buildOrderAnalysisXlsxRows 와 같은 열·같은 값 (실제 파일 2종)', () => {
+  assert.ok(xlsxOaCompare([[REAL[0], readSrc(REAL[0]), [36, 45]], [REAL[1], readSrc(REAL[1]), [39]]]) > 50);
 });
 
-test('XLSX Order RSS Sum 시트 — v34 와 같은 열, 구성 오더 범위 문자열·RSS 값', () => {
-  const text = readSrc(REAL[0]);
+function xlsxRssCompare(file, text) {
   const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' });
-  const rep = v34Read(v, text, REAL[0]);
+  const rep = v34Read(v, text, file);
   const results = L.analyzeAll(L.linearize(readTl(text).n.groups, {}).groups, { orders: '36, 45', searchHz: 1, sumHz: 1 });
   const rows = L.xlsxRssRows(results);
   assert.deepEqual(rows[0], ['채널', '위치', '방향', '합산 오더', 'RPM', '구성 오더별 진폭', '오더별 피크 중심 합산 범위', 'RSS 합산 내부값', '표시진폭', '표시단위', '구성 오더 유효성']);
@@ -462,11 +507,18 @@ test('XLSX Order RSS Sum 시트 — v34 와 같은 열, 구성 오더 범위 문
       assert.equal(got[6], t.componentRows.map(x => `${x.order}차: ${f2(x.row.sumMin)}~${f2(x.row.sumMax)} Hz`).join(' | '));
       close(got[7], t.orderAmplitude, t.orderAmplitude * 1e-9);
       assert.equal(got[10], t.matched ? '모두 일치' : '일부 불일치');
-      assert.match(got[5], /^36차=\S+ g \| 45차=\S+ g$/);
+      assert.match(got[5], res.group.channelType === 'noise' ? /^36차=\S+ dB \| 45차=\S+ dB$/ : /^36차=\S+ g \| 45차=\S+ g$/);
     }
   }
   assert.equal(r, rows.length);
+  return r - 1;
+}
+test('XLSX Order RSS Sum 시트 — v34 와 같은 열, 구성 오더 범위 문자열·RSS 값 (합성 예시)', () => {
+  assert.equal(xlsxRssCompare(SYN[0][0], SYN[0][1]), 3 * 5);
   assert.equal(L.sig4(0.000123456), '1.235e-4'); assert.equal(L.sig4(12.3456), '12.35'); assert.equal(L.sig4(12345), (12345).toExponential(3)); assert.equal(L.sig4(null), '-');
+});
+testReal('XLSX Order RSS Sum 시트 — v34 와 같은 열 (실제 파일 A)', () => {
+  assert.equal(xlsxRssCompare(REAL[0], readSrc(REAL[0])), 4 * 5);
 });
 
 test('XLSX 시트 목록 — v34 세 시트 + 이 도구 표, RSS 시트는 오더 2개 이상일 때만, SheetJS 로 쓰고 다시 읽기', () => {
@@ -527,21 +579,26 @@ test('설정 검사 — 즉시 다시 계산과 「다시 계산」 버튼이 �
   assert.match(L.validateSettings({ ...ok, vibSrcRef: '0' }), /기준값/);
 });
 
-test('칸 수 — 실제 파일 크기와 즉시 다시 계산 한도', () => {
+test('칸 수 — 합성 파일 크기와 즉시 다시 계산 한도', () => {
+  assert.equal(L.cellCount(readTl(Sample.testlabCsv()).n.groups), 15 * 801);
+  assert.ok(L.cellCount(readTl(FIXTURE).n.groups) < L.LIVE_CELL_LIMIT);
+  assert.equal(L.cellCount([]), 0);
+});
+testReal('칸 수 — 실제 파일 크기와 즉시 다시 계산 한도', () => {
   assert.equal(L.cellCount(readTl(readSrc(REAL[0])).n.groups), 20 * 1001);
   assert.equal(L.cellCount(readTl(readSrc(REAL[1])).n.groups), 60 * 1001);
   assert.ok(L.cellCount(readTl(readSrc(REAL[1])).n.groups) < L.LIVE_CELL_LIMIT);
-  assert.equal(L.cellCount([]), 0);
 });
 
 // ── 2026-09-30 4차: 제출자 분석기 v40 · Overall · 오더 기여도 ──
-test('v40 — 계산 함수가 v34 와 글자까지 같고, v40 으로 돌려도 오더 진폭이 같음 (실제 파일 2종)', () => {
+test('v40 — 계산 함수가 v34 와 글자까지 같음', () => {
   const a = fs.readFileSync(V34_PATH, 'utf8'), b = fs.readFileSync(V40_PATH, 'utf8');
   assert.match(b, /ANALYZER_VERSION = 'v40'/);
   for (const n of V34_NAMES) assert.equal(v34Extract(b, n), v34Extract(a, n), 'v40 에서 바뀐 계산 함수: ' + n);
+});
+function v40Compare(cases) {
   let compared = 0;
-  for (const [file, orders] of [[REAL[0], [36, 45]], [REAL[1], [39]]]) {
-    const text = readSrc(file);
+  for (const [file, text, orders] of cases) {
     const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' }, V40_PATH);
     const rep = v34Read(v, text, file);
     const results = L.analyzeAll(L.linearize(readTl(text).n.groups, {}).groups, { orders: orders.join(','), searchHz: 1, sumHz: 1 });
@@ -558,7 +615,13 @@ test('v40 — 계산 함수가 v34 와 글자까지 같고, v40 으로 돌려도
       });
     }
   }
-  assert.equal(compared, 4 * 2 * 5 + 6 * 10);
+  return compared;
+}
+test('v40 으로 돌려도 오더 진폭이 같음 (합성 2종)', () => {
+  assert.equal(v40Compare(SYN), 3 * 2 * 5 + 4 * 4);
+});
+testReal('v40 으로 돌려도 오더 진폭이 같음 (실제 파일 2종)', () => {
+  assert.equal(v40Compare([[REAL[0], readSrc(REAL[0]), [36, 45]], [REAL[1], readSrc(REAL[1]), [39]]]), 4 * 2 * 5 + 6 * 10);
 });
 
 test('Overall — 범위 안 칸들의 제곱합의 제곱근, 범위·빈 범위·A-가중', () => {
@@ -612,10 +675,11 @@ test('기여도 — dBA 는 A-가중 에너지 비율, 합산 창 겹침 경고'
   assert.equal(miss.contrib[0].parts[1].share, null); assert.equal(miss.contrib[0].rest, null);
 });
 
-test('기여도 — 실제 파일 2종: Overall·오더 에너지를 스펙트럼에서 따로 제곱합해 대조, 표·XLSX 시트', () => {
+function contribCompare(cases) {
   let checked = 0;
-  for (const [file, orders] of [[REAL[0], '36, 45'], [REAL[1], '39']]) {
-    const groups = L.linearize(readTl(readSrc(file)).n.groups, {}).groups;
+  for (const [file, text, ords] of cases) {
+    const orders = ords.join(', ');
+    const groups = L.linearize(readTl(text).n.groups, {}).groups;
     const results = L.analyzeAll(groups, { orders, searchHz: 1, sumHz: 1 });
     for (const res of results) {
       assert.ok(!res.log.some(x => /겹쳐|범위 밖으로|칸이 없는 RPM/.test(x.message)), file + ' 기여도 경고 없음');
@@ -643,7 +707,13 @@ test('기여도 — 실제 파일 2종: Overall·오더 에너지를 스펙트�
     const sheet = L.workbookSheets(results, { orders }, [], {}).find(s => s.name === '기여도 분석');
     assert.deepEqual(sheet.rows, rows);
   }
-  assert.equal(checked, 20 + 60);
+  return checked;
+}
+test('기여도 — 합성 2종: Overall·오더 에너지를 스펙트럼에서 따로 제곱합해 대조, 표·XLSX 시트', () => {
+  assert.equal(contribCompare(SYN), 15 + 16);
+});
+testReal('기여도 — 실제 파일 2종: Overall·오더 에너지를 스펙트럼에서 따로 제곱합해 대조, 표·XLSX 시트', () => {
+  assert.equal(contribCompare([[REAL[0], readSrc(REAL[0]), [36, 45]], [REAL[1], readSrc(REAL[1]), [39]]]), 20 + 60);
 });
 
 test('XLSX Settings — v40 항목(RSS 합산 그래프·Spectrum Map 가로축) + Overall 범위·기여도 기준', () => {
@@ -671,6 +741,9 @@ test('CSV 인식 신호등 (v40) — 오류 빨강 · 경고 노랑 · 없으면
   assert.equal(y.level, 'yellow'); assert.equal(y.warnings, 2);
   const r = L.recognitionSignal([{ level: '경고' }, { level: '오류' }]);
   assert.equal(r.level, 'red'); assert.equal(r.errors, 1); assert.equal(r.text, 'CSV 인식 오류');
+  assert.equal(L.recognitionSignal(readTl(Sample.testlabCsv()).n.log.filter(x => x.level !== '정보'), 15).level, 'green');
+});
+testReal('CSV 인식 신호등 — 실제 파일 A 는 초록', () => {
   assert.equal(L.recognitionSignal(readTl(readSrc(REAL[0])).n.log.filter(x => x.level !== '정보'), 20).level, 'green');
 });
 
@@ -689,4 +762,4 @@ test('컬러맵 최대값 칸 (v40 MAX) — 보이는 범위 안, 동점은 먼�
   assert.equal(ord.freq, 30); assert.equal(ord.rpm, 1000);
 });
 
-console.log(process.exitCode ? '\n실패가 있습니다' : '\n' + passed + '개 모두 통과');
+console.log(process.exitCode ? '\n실패가 있습니다' : '\n' + passed + '개 통과' + (skipped ? ', ' + skipped + '개 건너뜀(실제 파일 없음 — REAL_TESTLAB_DIR)' : ''));
