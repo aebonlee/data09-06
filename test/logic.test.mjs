@@ -227,7 +227,7 @@ test('예시(가로형·열=RPM) — 배치 짐작과 읽기', () => {
 
 // ── 2026-09-28 2차: 제출자 분석기 v34·실제 Testlab Neo 파일 ──
 import fs from 'node:fs';
-import { loadV34, v34Read, V34_PATH } from './v34-harness.mjs';
+import { loadV34, v34Read, V34_PATH, V40_PATH, NAMES as V34_NAMES, extract as v34Extract } from './v34-harness.mjs';
 const SRC = new URL('../docs/source/', import.meta.url);
 const REAL = ['sim)130B-X 36,45order.csv', 'sim)30B-X 39order.csv'];
 const readSrc = f => fs.readFileSync(new URL(encodeURIComponent(f).replace(/%2C/g, ','), SRC), 'utf8');
@@ -474,7 +474,7 @@ test('XLSX 시트 목록 — v34 세 시트 + 이 도구 표, RSS 시트는 오�
   const groups = L.linearize(readTl(Sample.testlabCsv()).n.groups, {}).groups;
   const log = [{ level: '경고', line: 12, message: '예시' }];
   const two = L.workbookSheets(L.analyzeAll(groups, { orders: '36, 45' }), { orders: '36, 45' }, log, { fileName: 'a.csv', savedAt: 'x' });
-  assert.deepEqual(two.map(s => s.name), ['Settings', 'Order Analysis', 'Order RSS Sum', '오더별 최대', '피크 목록', '에너지 합산', '경고 로그']);
+  assert.deepEqual(two.map(s => s.name), ['Settings', 'Order Analysis', 'Order RSS Sum', '기여도 분석', '오더별 최대', '피크 목록', '에너지 합산', '경고 로그']);
   const one = L.workbookSheets(L.analyzeAll(groups, { orders: '36' }), { orders: '36' }, log, {});
   assert.ok(!one.some(s => s.name === 'Order RSS Sum'));
   const set = Object.fromEntries(two[0].rows.slice(1));
@@ -532,6 +532,161 @@ test('칸 수 — 실제 파일 크기와 즉시 다시 계산 한도', () => {
   assert.equal(L.cellCount(readTl(readSrc(REAL[1])).n.groups), 60 * 1001);
   assert.ok(L.cellCount(readTl(readSrc(REAL[1])).n.groups) < L.LIVE_CELL_LIMIT);
   assert.equal(L.cellCount([]), 0);
+});
+
+// ── 2026-09-30 4차: 제출자 분석기 v40 · Overall · 오더 기여도 ──
+test('v40 — 계산 함수가 v34 와 글자까지 같고, v40 으로 돌려도 오더 진폭이 같음 (실제 파일 2종)', () => {
+  const a = fs.readFileSync(V34_PATH, 'utf8'), b = fs.readFileSync(V40_PATH, 'utf8');
+  assert.match(b, /ANALYZER_VERSION = 'v40'/);
+  for (const n of V34_NAMES) assert.equal(v34Extract(b, n), v34Extract(a, n), 'v40 에서 바뀐 계산 함수: ' + n);
+  let compared = 0;
+  for (const [file, orders] of [[REAL[0], [36, 45]], [REAL[1], [39]]]) {
+    const text = readSrc(file);
+    const v = loadV34({ noiseAmplitudeMode: 'db', vibrationAmplitudeMode: 'linear' }, V40_PATH);
+    const rep = v34Read(v, text, file);
+    const results = L.analyzeAll(L.linearize(readTl(text).n.groups, {}).groups, { orders: orders.join(','), searchHz: 1, sumHz: 1 });
+    for (const res of results) {
+      const ch = rep.normalized.channels[L.channelId(res.group)];
+      res.tracks.forEach((t, k) => {
+        v.calculateOrderRows(ch, orders[k], 1, 1, 1).forEach((w, i) => {
+          const p = t.points[i];
+          assert.equal(p.rpm, w.rpm);
+          assert.equal(p.freq, w.peakFrequency);
+          close(p.amp, w.orderAmplitude, Math.abs(w.orderAmplitude) * 1e-9);
+          compared++;
+        });
+      });
+    }
+  }
+  assert.equal(compared, 4 * 2 * 5 + 6 * 10);
+});
+
+test('Overall — 범위 안 칸들의 제곱합의 제곱근, 범위·빈 범위·A-가중', () => {
+  const sp = { rpm: 600, freqs: [100, 101, 102, 103], amps: [3, 4, 0, 0] };
+  const all = L.overallOf(sp, '', '');
+  assert.equal(all.amp, 5); assert.equal(all.bins, 4); assert.equal(all.lo, 100); assert.equal(all.hi, 103);
+  const part = L.overallOf(sp, '101', '102.5');
+  assert.equal(part.amp, 4); assert.equal(part.bins, 2); assert.equal(part.lo, 101); assert.equal(part.hi, 102);
+  const none = L.overallOf(sp, 500, '');
+  assert.equal(none.amp, null); assert.equal(none.bins, 0);
+  const wa = Math.sqrt(9 * Math.pow(10, L.aWeighting(100) / 10) + 16 * Math.pow(10, L.aWeighting(101) / 10));
+  close(all.ampA, wa, 1e-12);
+});
+
+// 합성 스펙트럼: RPM 600 → 1X = 10 Hz. 100 Hz 에 3, 105 Hz 에 4, 나머지 0 → Overall 5 (에너지 25)
+function contribSpec() {
+  const freqs = [], amps = [];
+  for (let f = 90; f <= 110; f++) { freqs.push(f); amps.push(f === 100 ? 3 : f === 105 ? 4 : 0); }
+  return { channel: 'P1', direction: 'X', unit: 'g', channelType: 'vibration', spectra: [{ rpm: 600, freqs, amps }] };
+}
+test('기여도 — 오더 에너지 ÷ Overall 에너지 (손 계산 36% · 64%), 기타 = 100 − 합', () => {
+  const res = L.analyzeGroup(contribSpec(), { orders: '10, 10.5', searchHz: 1, sumHz: 1, vibMode: 'linear' });
+  const c = res.contrib[0];
+  assert.equal(c.overall, 5); assert.equal(c.bins, 21);
+  close(c.parts[0].share, 36); close(c.parts[1].share, 64);
+  close(c.orderShare, 100); close(c.rest, 0);
+  assert.equal(c.overlap, false); assert.equal(c.outside, false);
+  assert.equal(res.contribBasis, '에너지(진폭²) 비율');
+  // Overall 범위를 좁히면 분모가 줄어 기여도가 커지고, 창이 범위 밖으로 나가면 표시
+  const nar = L.analyzeGroup(contribSpec(), { orders: '10', searchHz: 1, sumHz: 1, overallLo: '100', overallHi: '104' });
+  close(nar.contrib[0].parts[0].share, 100); assert.equal(nar.contrib[0].outside, true);
+  assert.ok(nar.log.some(x => /Overall 범위\(100~104 Hz\) 밖/.test(x.message)));
+  // dB 표시: Overall 표시값 = 20·log10(5 / 기준)
+  const db = L.analyzeGroup(contribSpec(), { orders: '10', vibMode: 'db', vibRef: 1e-6 });
+  close(db.contrib[0].disp, 20 * Math.log10(5 / 1e-6));
+  close(db.contrib[0].parts[0].share, 36);   // dB 로 봐도 기여도(에너지 비율)는 같음
+});
+test('기여도 — dBA 는 A-가중 에너지 비율, 합산 창 겹침 경고', () => {
+  const res = L.analyzeGroup(contribSpec(), { orders: '10, 10.5', vibMode: 'dba', vibRef: 1e-6 });
+  const wa = 9 * Math.pow(10, L.aWeighting(100) / 10), wb = 16 * Math.pow(10, L.aWeighting(105) / 10);
+  close(res.contrib[0].parts[0].share, wa / (wa + wb) * 100, 1e-9);
+  close(res.contrib[0].rest, 0, 1e-9);
+  assert.match(res.contribBasis, /A-가중/);
+  // 10차와 10.1차는 같은 피크(100 Hz)를 잡아 합산 창이 겹칩니다 → 합 72 %, 경고
+  const ov = L.analyzeGroup(contribSpec(), { orders: '10, 10.1', searchHz: 1, sumHz: 1 });
+  assert.equal(ov.contrib[0].overlap, true);
+  close(ov.contrib[0].orderShare, 72);
+  assert.ok(ov.log.some(x => /합산 창이 겹쳐/.test(x.message)));
+  // 값 없는 오더(범위 밖)가 있으면 합·기타는 비움
+  const miss = L.analyzeGroup(contribSpec(), { orders: '10, 50', searchHz: 1, sumHz: 1 });
+  assert.equal(miss.contrib[0].parts[1].share, null); assert.equal(miss.contrib[0].rest, null);
+});
+
+test('기여도 — 실제 파일 2종: Overall·오더 에너지를 스펙트럼에서 따로 제곱합해 대조, 표·XLSX 시트', () => {
+  let checked = 0;
+  for (const [file, orders] of [[REAL[0], '36, 45'], [REAL[1], '39']]) {
+    const groups = L.linearize(readTl(readSrc(file)).n.groups, {}).groups;
+    const results = L.analyzeAll(groups, { orders, searchHz: 1, sumHz: 1 });
+    for (const res of results) {
+      assert.ok(!res.log.some(x => /겹쳐|범위 밖으로|칸이 없는 RPM/.test(x.message)), file + ' 기여도 경고 없음');
+      res.contrib.forEach((c, i) => {
+        const sp = res.group.spectra[i];
+        const E = sp.amps.reduce((s, a) => s + a * a, 0);
+        close(c.energy, E, E * 1e-12);
+        assert.equal(c.bins, sp.freqs.length);
+        c.parts.forEach((q, k) => {
+          const p = res.tracks[k].points[i];
+          const e = sp.freqs.reduce((s, f, j) => f >= p.sumMin && f <= p.sumMax ? s + sp.amps[j] ** 2 : s, 0);
+          close(q.share, e / E * 100, 1e-9);
+          assert.ok(q.share >= 0 && q.share <= 100);
+        });
+        close(c.orderShare + c.rest, 100, 1e-9);
+        if (res.group.channelType === 'noise') close(c.disp, 20 * Math.log10(c.overall / 2e-5), 1e-9);
+        checked++;
+      });
+    }
+    const rows = L.xlsxContribRows(results);
+    const ol = orders.split(',').map(x => x.trim());
+    assert.deepEqual(rows[0].slice(11, 11 + ol.length * 2), ol.flatMap(o => [o + '차 표시진폭', o + '차 기여도_%']));
+    assert.equal(rows.length - 1, results.reduce((s, r) => s + r.group.spectra.length, 0));
+    assert.equal(L.contribRows(results).length, rows.length);
+    const sheet = L.workbookSheets(results, { orders }, [], {}).find(s => s.name === '기여도 분석');
+    assert.deepEqual(sheet.rows, rows);
+  }
+  assert.equal(checked, 20 + 60);
+});
+
+test('XLSX Settings — v40 항목(RSS 합산 그래프·Spectrum Map 가로축) + Overall 범위·기여도 기준', () => {
+  const set = Object.fromEntries(L.xlsxSettingsRows({ overallLo: '1000', overallHi: '' }, { mapAxis: 'order', showRss: false, showOverall: true, showContrib: false }).slice(1));
+  assert.equal(set['Spectrum Map 가로축 기준'], 'Order');
+  assert.equal(set['RSS 합산 그래프 표시'], '숨김');
+  assert.equal(set['Overall 범위'], '1000~끝 Hz');
+  assert.equal(set['Overall 그래프 표시'], '표시'); assert.equal(set['기여도 그래프 표시'], '숨김');
+  assert.match(set['기여도 기준'], /오더 에너지 ÷ Overall 에너지/);
+  assert.equal(Object.fromEntries(L.xlsxSettingsRows({}, {}).slice(1))['Overall 범위'], '측정 범위 전체');
+});
+
+test('설정 검사 — Overall 범위', () => {
+  const ok = Object.assign({}, L.DEFAULT_SETTINGS, { orders: '1' });
+  assert.equal(L.validateSettings(Object.assign({}, ok, { overallLo: '1000', overallHi: '2000' })), null);
+  assert.equal(L.validateSettings(Object.assign({}, ok, { overallLo: '', overallHi: '1500' })), null);
+  assert.match(L.validateSettings(Object.assign({}, ok, { overallLo: '2000', overallHi: '1000' })), /Overall 범위 끝/);
+  assert.match(L.validateSettings(Object.assign({}, ok, { overallLo: 'abc' })), /Overall 범위는 숫자/);
+});
+
+test('CSV 인식 신호등 (v40) — 오류 빨강 · 경고 노랑 · 없으면 초록', () => {
+  assert.equal(L.recognitionSignal([], 20).level, 'green');
+  assert.match(L.recognitionSignal([{ level: '정보' }], 20).detail, /Curve 20개/);
+  const y = L.recognitionSignal([{ level: '경고' }, { level: '경고' }, { level: '정보' }]);
+  assert.equal(y.level, 'yellow'); assert.equal(y.warnings, 2);
+  const r = L.recognitionSignal([{ level: '경고' }, { level: '오류' }]);
+  assert.equal(r.level, 'red'); assert.equal(r.errors, 1); assert.equal(r.text, 'CSV 인식 오류');
+  assert.equal(L.recognitionSignal(readTl(readSrc(REAL[0])).n.log.filter(x => x.level !== '정보'), 20).level, 'green');
+});
+
+test('컬러맵 최대값 칸 (v40 MAX) — 보이는 범위 안, 동점은 먼저 나온 칸', () => {
+  const sp = [{ rpm: 1000, freqs: [10, 20, 30] }, { rpm: 1100, freqs: [10, 20, 30] }];
+  const vals = [[1, 9, 2], [9, 3, null]];
+  const xOf = (s, i) => s.freqs[i];
+  const all = L.mapMaxPoint(sp, vals, xOf, 0, 100);
+  assert.deepEqual([all.rpm, all.freq, all.value], [1000, 20, 9]);
+  const right = L.mapMaxPoint(sp, vals, xOf, 25, 100);
+  assert.deepEqual([right.rpm, right.freq, right.value], [1000, 30, 2]);
+  const row2 = L.mapMaxPoint(sp, vals, xOf, 0, 100, k => k === 1);
+  assert.deepEqual([row2.rpm, row2.freq], [1100, 10]);
+  assert.equal(L.mapMaxPoint(sp, vals, xOf, 40, 50), null);
+  const ord = L.mapMaxPoint(sp, vals, (s, i) => L.toOrder(s.freqs[i], s.rpm, 1), 1.5, 2);   // 오더 축: 1000rpm 20Hz = 1.2차 제외, 30Hz = 1.8차
+  assert.equal(ord.freq, 30); assert.equal(ord.rpm, 1000);
 });
 
 console.log(process.exitCode ? '\n실패가 있습니다' : '\n' + passed + '개 모두 통과');

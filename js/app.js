@@ -7,6 +7,8 @@
   var L = window.OALogic, S = window.OAStore, Sample = window.OASample;
   var $ = function (id) { return document.getElementById(id); };
   var ORDER_COLORS = ['#1f5fa8', '#c62828', '#2e7d32', '#ef6c00', '#6a1b9a', '#00838f', '#5d4037', '#ad1457'];
+  var OVERALL_COLORS = ['#455a64', '#78909c', '#263238', '#90a4ae'];
+  var REST_COLOR = '#cfd6de';
 
   // 1차 배포(2026-09-28 오전)에 기억해 둔 설정에는 v34 방식이 없어 「대역 최대값」 이 남아 있습니다 — 그때 값이면 방식만 새 기본값(v34)으로 돌립니다
   function savedSettings() {
@@ -87,6 +89,9 @@
     var sug = isSample ? (testlab ? '36, 45' : '1, 2, 4') : L.ordersFromName(name);
     state.suggestedOrders = sug;
     if (sug) state.settings.orders = sug;
+    // 앞 파일에서 걸어 둔 즉시 다시 계산이 설정 칸의 옛 오더로 이 값을 덮지 않게, 기다리던 계산을 지우고 칸을 바로 맞춥니다
+    clearTimeout(liveTimer);
+    fillSettings();
     state.cfg = cfg;
     reparse();
     $('fileInfo').hidden = false;
@@ -182,6 +187,7 @@
     $('headerRow').disabled = c.layout === 'testlab';
     var headers = state.rows[c.headerRow] || [];
     var box = $('mapFields'); box.textContent = '';
+    $('recogSignal').hidden = true;
     if (c.layout === 'testlab') { renderTestlabPreview(box); return; }
     var required = { rpm: true, freq: true, value: true };
     fieldsFor(c.layout).forEach(function (f) {
@@ -218,6 +224,11 @@
     var t = $('preview'); t.textContent = '';
     $('previewTitle').textContent = '알아본 Curve (열마다 하나)';
     var tl = L.parseTestlab(state.rows, state.cfg.decimalComma);
+    // v40 「CSV 데이터 인식 확인」 신호등 — 분석 전에 한 번 읽어 보고 오류·경고 수로 색을 정합니다(정보는 세지 않음)
+    var dry = tl.error ? { log: [{ level: '오류', message: tl.error }] } : L.normalize(state.rows, state.cfg);
+    var sig = L.recognitionSignal(dry.log, tl.error ? 0 : tl.curves.length);
+    $('recogSignal').hidden = false; $('recogSignal').setAttribute('data-level', sig.level);
+    $('recogText').textContent = sig.text; $('recogDetail').textContent = sig.detail;
     if (tl.error) { box.appendChild(h('p', { class: 'note span-all' }, '이 파일은 Testlab Neo 형식으로 읽을 수 없습니다: ' + tl.error)); return; }
     box.appendChild(h('p', { class: 'note span-all' }, 'Curve ' + tl.curves.length + '개 · ' + (tl.format === 'shared' ? '0열 공통 주파수 + Curve별 진폭 열' : 'Curve별 X/Y 열') +
       ' · 데이터 시작 ' + tl.dataLine + '줄. RPM 은 Dataset name, 위치·방향은 DOF id, 단위는 Y axis unit, 원본 척도(dB 여부)는 데이터 바로 위 줄에서 읽습니다.'));
@@ -386,9 +397,18 @@
   }
   function redraw(kind) {
     if (!current()) return;
-    if (kind !== 'map') drawLine(lineResults());
+    if (kind !== 'map') { drawLine(lineResults()); drawContrib(current()); }
     if (kind !== 'line') drawMap(current());
   }
+  // 그래프 표시 옵션 (v34·v40 「오더 RSS 합산 그래프 표시」 + 4차 요청 Overall · 기여도 분석) — 브라우저에 기억
+  function opt(id) { return $(id).checked; }
+  ['showRss', 'showOverall', 'showContrib'].forEach(function (id) {
+    if (view[id] === false) $(id).checked = false;
+    $(id).addEventListener('change', function () {
+      view[id] = $(id).checked; var patch = {}; patch[id] = view[id]; S.setView(patch);
+      if (current()) redraw('line');
+    });
+  });
 
   function renderResults() {
     var res = current(); if (!res) return;
@@ -403,11 +423,13 @@
      ['단위 · 원본', (g.channelType === 'noise' ? '소음 · ' : '진동 · ') + src],
      ['그래프 표시', disp],
      ['오더 계산', L.METHOD_LABEL[res.method] + (res.method === 'peak' ? ' · 검색 ±' + res.searchHz + ' Hz · 합산 ±' + res.sumHz + ' Hz' : ' · ±' + res.halfWidth + ' 오더')],
-     ['에너지 합산 대역', res.band]].forEach(function (kv) {
+     ['에너지 합산 대역', res.band],
+     ['Overall · 기여도', res.overallRange + ' · ' + res.contribBasis]].forEach(function (kv) {
       box.appendChild(h('dl', { class: 'stat' }, h('dt', null, kv[0]), h('dd', null, kv[1])));
     });
     renderOverlayList();
     drawLine(lineResults());
+    drawContrib(res);
     drawMap(res);
     renderTables(res);
   }
@@ -445,7 +467,8 @@
     var series = [];
     list.forEach(function (res) {
       res.tracks.forEach(function (t) { series.push({ res: res, order: t.order, points: t.points, rss: false }); });
-      if (res.rssSum) series.push({ res: res, orders: res.rssSum.orders, points: res.rssSum.points, rss: true });
+      if (res.rssSum && opt('showRss')) series.push({ res: res, orders: res.rssSum.orders, points: res.rssSum.points, rss: true });
+      if (opt('showOverall') && res.contrib) series.push({ res: res, overall: true, points: res.contrib.map(function (c) { return { rpm: c.rpm, disp: c.disp, matched: true, c: c }; }) });
     });
     var r0 = Infinity, r1 = -Infinity, y0 = Infinity, y1 = -Infinity, allLinear = true, units = {};
     list.forEach(function (res) {
@@ -481,7 +504,7 @@
     }
     var uk = Object.keys(units).filter(Boolean);
     s('text', { x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430' }, 'RPM');
-    s('text', { x: 14, y: m.t + (H - m.t - m.b) / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430', transform: 'rotate(-90 14 ' + (m.t + (H - m.t - m.b) / 2) + ')' }, '오더 진폭' + (uk.length === 1 ? ' (' + uk[0] + ')' : uk.length > 1 ? ' (단위 섞임)' : ''));
+    s('text', { x: 14, y: m.t + (H - m.t - m.b) / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430', transform: 'rotate(-90 14 ' + (m.t + (H - m.t - m.b) / 2) + ')' }, (opt('showOverall') ? '진폭' : '오더 진폭') + (uk.length === 1 ? ' (' + uk[0] + ')' : uk.length > 1 ? ' (단위 섞임)' : ''));
     s('line', { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, stroke: '#8a95a3' });
     s('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: '#8a95a3' });
     // 그림 영역 밖(입력한 축 범위 밖)은 잘라 냅니다 — 가장자리 점이 반만 보이지 않게 4px 여유
@@ -493,8 +516,8 @@
     var pts = [];
     var legend = $('lineLegend'); legend.textContent = '';
     series.forEach(function (se, k) {
-      var color = ORDER_COLORS[k % ORDER_COLORS.length];
-      var name = (multi ? L.groupLabel(se.res.group) + ' · ' : '') + (se.rss ? 'RSS(' + se.orders.join('+') + ')' : se.order + '차');
+      var color = se.overall ? (multi ? OVERALL_COLORS[list.indexOf(se.res) % OVERALL_COLORS.length] : '#455a64') : ORDER_COLORS[k % ORDER_COLORS.length];
+      var name = (multi ? L.groupLabel(se.res.group) + ' · ' : '') + (se.overall ? 'Overall' : se.rss ? 'RSS(' + se.orders.join('+') + ')' : se.order + '차');
       var d = '', pen = false, best = null;
       se.points.forEach(function (p) {
         if (p.disp == null) { pen = false; return; }
@@ -503,16 +526,16 @@
         if (!best || p.disp > best.disp) best = p;
         if (inView(p)) pts.push({ x: X(p.rpm), y: Y(p.disp), p: p, se: se, name: name, color: color });
       });
-      if (d) s('path', { d: d, fill: 'none', stroke: color, 'stroke-width': se.rss ? 2.8 : 2.2, 'stroke-dasharray': se.rss ? '7 4' : null, 'clip-path': 'url(#lineClip)' });
+      if (d) s('path', { d: d, fill: 'none', stroke: color, 'stroke-width': se.overall ? 3.4 : se.rss ? 2.8 : 2.2, 'stroke-dasharray': se.rss ? '7 4' : null, 'stroke-opacity': se.overall ? 0.85 : null, 'clip-path': 'url(#lineClip)' });
       se.points.forEach(function (p) {
         if (p.disp == null || !inView(p)) return;
         s('circle', { cx: X(p.rpm), cy: Y(p.disp), r: p.matched ? 2.8 : 3.6, fill: p.matched ? color : '#fff', stroke: p.matched ? color : '#c62828', 'stroke-width': p.matched ? 1 : 2 });
       });
-      legend.appendChild(h('span', null, h('i', { style: 'background:' + color + (se.rss ? ';height:3px;background:repeating-linear-gradient(90deg,' + color + ' 0 6px,transparent 6px 9px)' : '') }),
+      legend.appendChild(h('span', null, h('i', { style: 'background:' + color + (se.overall ? ';height:6px' : '') + (se.rss ? ';height:3px;background:repeating-linear-gradient(90deg,' + color + ' 0 6px,transparent 6px 9px)' : '') }),
         name + (best ? ' (최대 ' + fmt(best.disp) + ' ' + se.res.display.unit + ' @ ' + fmt(best.rpm) + ' RPM)' : ' (값 없음)')));
     });
     var hi = s('circle', { r: 6, fill: 'none', stroke: '#1b2430', 'stroke-width': 2, visibility: 'hidden' });
-    lineGeom = { W: W, H: H, pts: pts, hi: hi };
+    lineGeom = { W: W, H: H, pts: pts, hi: hi, r0: r0, r1: r1 };
   }
   function lineHover(ev) {
     if (!lineGeom || !lineGeom.pts.length) return;
@@ -525,6 +548,14 @@
     lineGeom.hi.setAttribute('cx', best.x); lineGeom.hi.setAttribute('cy', best.y); lineGeom.hi.setAttribute('visibility', 'visible');
     var p = best.p, res = best.se.res, u = ' ' + res.display.unit;
     var lines = [best.name, 'RPM ' + fmt(p.rpm), '진폭 ' + fmt(p.disp) + u];
+    if (best.se.overall) {
+      var c = p.c;
+      lines.push('Overall 범위 ' + fmt(c.lo, 1) + '~' + fmt(c.hi, 1) + ' Hz · ' + c.bins + '칸');
+      c.parts.forEach(function (q) { lines.push(q.order + '차 기여도 ' + (q.share == null ? '-' : fmt(q.share, 2) + ' %')); });
+      lines.push('기타(오더 외) ' + (c.rest == null ? '-' : fmt(c.rest, 2) + ' %'));
+      showTip('lineTip', $('lineWrap'), best.x / sx, best.y / sy, lines);
+      return;
+    }
     if (best.se.rss) {
       p.comps.forEach(function (c, k) { lines.push(best.se.orders[k] + '차 ' + fmt(c.disp) + u + ' @ ' + fmt(c.freq, 1) + ' Hz'); });
     } else if (res.method === 'peak') {
@@ -538,6 +569,85 @@
   $('lineChart').addEventListener('pointermove', lineHover);
   $('lineChart').addEventListener('pointerdown', lineHover);
   $('lineChart').addEventListener('pointerleave', function () { hideTip('lineTip'); if (lineGeom) lineGeom.hi.setAttribute('visibility', 'hidden'); });
+
+  // RPM 별 오더 기여도 누적 막대 (SVG) — 지금 채널만. 오더마다 선 그래프와 같은 색, 기타(오더 외)는 회색.
+  // 가로축(RPM)은 위 선 그래프와 같은 범위를 씁니다(축 범위 입력을 따라감).
+  var contribGeom = null;
+  function drawContrib(res) {
+    var on = opt('showContrib');
+    $('contribBox').hidden = !on;
+    if (!on || !res) { contribGeom = null; return; }
+    var svg = $('contribChart'), cs = res.contrib || [];
+    var W = Math.max(280, Math.round($('contribWrap').clientWidth || 800)), H = document.documentElement.clientWidth < 560 ? 220 : 260, m = { l: 64, r: 16, t: 14, b: 44 };
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.style.height = H + 'px';
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var NS = 'http://www.w3.org/2000/svg';
+    function s(tag, a, txt) { var el = document.createElementNS(NS, tag); Object.keys(a).forEach(function (k) { if (a[k] != null) el.setAttribute(k, a[k]); }); if (txt != null) el.textContent = txt; svg.appendChild(el); return el; }
+    var multi = lineResults().length > 1;
+    $('contribNote').textContent = L.groupLabel(res.group) + ' · Overall 범위 ' + res.overallRange + ' · ' + res.contribBasis + (multi ? ' · 겹쳐 보기 중이어도 기여도는 지금 채널만 그립니다' : '');
+    // RPM 범위는 위 선 그래프와 같게(축 범위 입력을 따름) 하고, 양 끝 막대가 잘리지 않게 RPM 간격의 절반만큼 넓힙니다
+    var r0 = lineGeom ? lineGeom.r0 : cs[0].rpm, r1 = lineGeom ? lineGeom.r1 : cs[cs.length - 1].rpm;
+    var vis = cs.filter(function (c) { return c.rpm >= r0 - 1e-9 && c.rpm <= r1 + 1e-9; });
+    var dr = Infinity;
+    for (var k = 1; k < vis.length; k++) dr = Math.min(dr, vis[k].rpm - vis[k - 1].rpm);
+    if (!isFinite(dr) || !(dr > 0)) dr = Math.max(1, (r1 - r0) / 4 || 100);
+    r0 -= dr / 2; r1 += dr / 2;
+    var X = function (r) { return m.l + (r - r0) / (r1 - r0) * (W - m.l - m.r); };
+    var Y = function (pc) { return H - m.b - pc / 100 * (H - m.t - m.b); };
+    for (var i = 0; i <= 4; i++) {
+      s('line', { x1: m.l, x2: W - m.r, y1: Y(i * 25), y2: Y(i * 25), stroke: '#e3e8ee' });
+      s('text', { x: m.l - 6, y: Y(i * 25) + 4, 'text-anchor': 'end', 'font-size': 12, fill: '#56616f' }, (i * 25) + '%');
+    }
+    // 가로 눈금 = 막대의 RPM (많으면 건너뜀)
+    var every = Math.max(1, Math.ceil(vis.length / (W < 480 ? 5 : 12)));
+    vis.forEach(function (c, k) { if (k % every === 0) s('text', { x: X(c.rpm), y: H - m.b + 18, 'text-anchor': 'middle', 'font-size': 12, fill: '#56616f' }, String(c.rpm)); });
+    s('text', { x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430' }, 'RPM');
+    s('text', { x: 14, y: m.t + (H - m.t - m.b) / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#1b2430', transform: 'rotate(-90 14 ' + (m.t + (H - m.t - m.b) / 2) + ')' }, '기여도 (%)');
+    s('line', { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, stroke: '#8a95a3' });
+    s('line', { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: '#8a95a3' });
+    // 막대 폭: 가장 좁은 RPM 간격의 60 % (최대 56px)
+    var bw = Math.max(4, Math.min(56, (X(r0 + dr) - X(r0)) * 0.6));
+    var bars = [];
+    vis.forEach(function (c) {
+      var x = X(c.rpm) - bw / 2, acc = 0;
+      if (!c.bins) { s('text', { x: X(c.rpm), y: Y(50), 'text-anchor': 'middle', 'font-size': 11, fill: '#8a95a3' }, '값 없음'); return; }
+      c.parts.forEach(function (q, qi) {
+        if (q.share == null || !(q.share > 0)) return;
+        var h0 = Math.min(q.share, 100 - acc); if (!(h0 > 0)) return;
+        s('rect', { x: x, y: Y(acc + h0), width: bw, height: Y(acc) - Y(acc + h0), fill: ORDER_COLORS[qi % ORDER_COLORS.length] });
+        if (Y(acc) - Y(acc + h0) >= 14 && bw >= 30) s('text', { x: X(c.rpm), y: (Y(acc) + Y(acc + h0)) / 2 + 4, 'text-anchor': 'middle', 'font-size': 11, fill: '#fff' }, fmt(q.share, 1));
+        acc += h0;
+      });
+      if (c.rest != null && c.rest > 0 && acc < 100) {
+        s('rect', { x: x, y: Y(100), width: bw, height: Y(acc) - Y(100), fill: REST_COLOR });
+      }
+      if (c.overlap || c.outside) s('text', { x: X(c.rpm), y: Y(100) - 2, 'text-anchor': 'middle', 'font-size': 12, fill: '#c62828', 'font-weight': 700 }, '!');
+      bars.push({ x0: x, x1: x + bw, c: c });
+    });
+    var legend = $('contribLegend'); legend.textContent = '';
+    res.orders.forEach(function (o, qi) { legend.appendChild(h('span', null, h('i', { style: 'height:12px;width:14px;background:' + ORDER_COLORS[qi % ORDER_COLORS.length] }), o + '차')); });
+    legend.appendChild(h('span', null, h('i', { style: 'height:12px;width:14px;background:' + REST_COLOR }), '기타(오더 외)'));
+    if (cs.some(function (c) { return c.overlap || c.outside; })) legend.appendChild(h('span', null, '빨간 「!」 = 합산 창 겹침 또는 Overall 범위 밖 — 경고 로그 참고'));
+    contribGeom = { W: W, H: H, bars: bars, res: res };
+  }
+  function contribHover(ev) {
+    if (!contribGeom || !contribGeom.bars.length) return;
+    var rect = $('contribChart').getBoundingClientRect(), sx = contribGeom.W / rect.width;
+    var x = (ev.clientX - rect.left) * sx;
+    var b = null, bd = Infinity;
+    contribGeom.bars.forEach(function (q) { var d = x < q.x0 ? q.x0 - x : x > q.x1 ? x - q.x1 : 0; if (d < bd) { bd = d; b = q; } });
+    if (!b || bd > 24) { hideTip('contribTip'); return; }
+    var c = b.c, u = ' ' + contribGeom.res.display.unit;
+    var lines = ['RPM ' + fmt(c.rpm), 'Overall ' + fmt(c.disp) + u + ' (' + fmt(c.lo, 1) + '~' + fmt(c.hi, 1) + ' Hz)'];
+    c.parts.forEach(function (q) { lines.push(q.order + '차 ' + (q.share == null ? '-' : fmt(q.share, 2) + ' %') + ' · ' + fmt(q.disp) + u); });
+    lines.push('기타(오더 외) ' + (c.rest == null ? '-' : fmt(c.rest, 2) + ' %'));
+    if (c.overlap) lines.push('합산 창이 겹쳐 오더 합이 큽니다');
+    if (c.outside) lines.push('오더 합산 창이 Overall 범위 밖으로 나감');
+    showTip('contribTip', $('contribWrap'), (b.x0 + b.x1) / 2 / sx, (ev.clientY - rect.top), lines);
+  }
+  $('contribChart').addEventListener('pointermove', contribHover);
+  $('contribChart').addEventListener('pointerdown', contribHover);
+  $('contribChart').addEventListener('pointerleave', function () { hideTip('contribTip'); });
 
   function showTip(id, wrap, x, y, lines) {
     var tip = $(id); tip.textContent = '';
@@ -611,6 +721,20 @@
         if (b > a) ctx.fillRect(a, Math.floor(yTop), b - a, Math.ceil(yBot) - Math.floor(yTop));
       }
     });
+    // 오더 축: 정수 오더마다 옅은 세로선, 추적 오더와 같은 정수는 진하게 (v40 Order 축 눈금)
+    var intTicks = [];
+    if (axis === 'order') {
+      var i0 = Math.ceil(x0), i1 = Math.floor(x1), cnt = i1 - i0 + 1;
+      var stepI = cnt <= 24 ? 1 : Math.ceil(cnt / 12);
+      for (var io = i0; io <= i1; io++) {
+        var sel = res.orders.some(function (o) { return Math.abs(o - io) < 1e-9; });
+        ctx.strokeStyle = sel ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.16)'; ctx.lineWidth = sel ? 1.2 : 0.7;
+        ctx.setLineDash(sel ? [4, 3] : [2, 4]);
+        ctx.beginPath(); ctx.moveTo(X(io), m.t); ctx.lineTo(X(io), m.t + ph); ctx.stroke();
+        if ((io - i0) % stepI === 0 || sel) intTicks.push({ v: io, sel: sel });
+      }
+      ctx.setLineDash([]);
+    }
     var peakPts = [];
     if ($('showPeaks').checked) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4;
@@ -644,11 +768,34 @@
       });
       ctx.setLineDash([]);
     }
+    // 보이는 범위의 최대값 칸 (v40 「MAX」) — 십자 + 이름표
+    var mx = L.mapMaxPoint(sp, vals, xOf, x0, x1, rowIn);
+    if (mx) {
+      var mxX = X(mx.xv), mxY = Y(mx.rpm);
+      ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mxX - 8, mxY); ctx.lineTo(mxX + 8, mxY); ctx.moveTo(mxX, mxY - 8); ctx.lineTo(mxX, mxY + 8); ctx.stroke();
+      ctx.beginPath(); ctx.arc(mxX, mxY, 4.5, 0, Math.PI * 2); ctx.fillStyle = '#111827'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      var mxLabel = 'MAX ' + fmt(mx.value) + ' ' + dsp.unit;
+      ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      var lw = ctx.measureText(mxLabel).width + 12, lx = mxX + 10, ly = mxY - 22;
+      if (lx + lw > m.l + pw) lx = mxX - lw - 10;
+      if (ly < m.t + 2) ly = mxY + 8;
+      ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.fillRect(lx, ly, lw, 18);
+      ctx.strokeStyle = 'rgba(30,40,50,.7)'; ctx.lineWidth = 1; ctx.strokeRect(lx, ly, lw, 18);
+      ctx.fillStyle = '#111827'; ctx.fillText(mxLabel, lx + 6, ly + 9);
+    }
+    $('mapMaxInfo').textContent = mx ? '최대값: ' + fmt(mx.value) + ' ' + dsp.unit + ' · ' + fmt(mx.rpm, 0) + ' RPM · ' + fmt(L.toOrder(mx.freq, mx.rpm, ratio), 3) + '차 · ' + fmt(mx.freq, 2) + ' Hz (보이는 범위 안)' : '';
     ctx.restore();
     // 축
     ctx.fillStyle = '#56616f'; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     var ticks = cssW < 480 ? 4 : 6;
-    for (var j = 0; j <= ticks; j++) { var xv = x0 + (x1 - x0) * j / ticks; ctx.textAlign = j === ticks ? 'right' : 'center'; ctx.fillText(fmt(xv, axis === 'order' || x1 - x0 < 10 ? 1 : 0), X(xv), m.t + ph + 16); }
+    if (axis === 'order' && intTicks.length >= 2) {
+      // 오더 축은 정수 눈금 (추적 오더는 굵게)
+      intTicks.forEach(function (tk) { ctx.font = (tk.sel ? 'bold ' : '') + '12px system-ui, sans-serif'; ctx.fillStyle = tk.sel ? '#1b2430' : '#56616f'; ctx.fillText(String(tk.v), X(tk.v), m.t + ph + 16); });
+      ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#56616f';
+    } else {
+      for (var j = 0; j <= ticks; j++) { var xv = x0 + (x1 - x0) * j / ticks; ctx.textAlign = j === ticks ? 'right' : 'center'; ctx.fillText(fmt(xv, axis === 'order' || x1 - x0 < 10 ? 1 : 0), X(xv), m.t + ph + 16); }
+    }
     ctx.fillStyle = '#1b2430'; ctx.textAlign = 'center';
     ctx.fillText(axis === 'order' ? '오더' : '주파수 (Hz)', m.l + pw / 2, cssH - 6);
     ctx.textAlign = 'right'; ctx.fillStyle = '#56616f';
@@ -768,6 +915,14 @@
       rows.push([r.rpm, r.peaks.map(function (p) { return p.rank + '위 ' + fmt(p.freq, 1) + ' Hz / ' + fmt(p.order, 2) + ' / ' + fmt(p.amp); }).join('  ·  ') || '-', fmt(res.energy[k].energy)]);
     });
     table($('peakTable'), rows, { 0: 1, 2: 1 });
+    // 기여도 표 (지금 채널) — 열: RPM · Overall · 오더마다 기여도 · 오더 합 · 기타
+    var ct = [['RPM', 'Overall (' + res.display.unit + ')'].concat(res.orders.map(function (o) { return o + '차 기여도 %'; }), ['오더 합 %', '기타 %', '확인'])];
+    res.contrib.forEach(function (c) {
+      ct.push([c.rpm, fmt(c.disp)].concat(c.parts.map(function (q) { return q.share == null ? '' : fmt(q.share, 2); }),
+        [c.orderShare == null ? '' : fmt(c.orderShare, 2), c.rest == null ? '' : fmt(c.rest, 2), [c.overlap ? '합산 창 겹침' : '', c.outside ? 'Overall 범위 밖 칸' : ''].filter(Boolean).join(', ')]));
+    });
+    var nc = {}; for (var q = 0; q < ct[0].length - 1; q++) nc[q] = 1;
+    table($('contribTable'), ct, nc);
   }
 
   // ── 저장 ──
@@ -780,6 +935,7 @@
       if (kind === 'track') { rows = L.trackRows(state.results); suffix = '오더추적'; }
       else if (kind === 'ordermax') { rows = L.orderMaxRows(state.results); suffix = '오더별최대'; }
       else if (kind === 'rss') { rows = L.rssRows(state.results); suffix = '오더RSS합산'; if (rows.length < 2) { toast('오더를 두 개 이상 적어야 RSS 합산이 나옵니다', true); return; } }
+      else if (kind === 'contrib') { rows = L.contribRows(state.results); suffix = '기여도분석'; }
       else if (kind === 'peaks') { rows = L.peakRows(state.results); suffix = '피크목록'; }
       else if (kind === 'energy') { rows = L.energyRows(state.results); suffix = '에너지합산'; }
       else { rows = L.logRows(allLog()); suffix = '경고로그'; }
@@ -801,7 +957,8 @@
     var sheets = L.workbookSheets(state.results, state.settings, allLog(), {
       fileName: state.isSample ? '(예시 데이터) ' + state.fileName : state.fileName,
       savedAt: new Date().toLocaleString('ko-KR'),
-      channel: '모든 채널 (' + state.results.length + '개) — 화면: ' + (cur ? L.groupLabel(cur.group) : '-')
+      channel: '모든 채널 (' + state.results.length + '개) — 화면: ' + (cur ? L.groupLabel(cur.group) : '-'),
+      mapAxis: state.mapAxis, showRss: opt('showRss'), showOverall: opt('showOverall'), showContrib: opt('showContrib')
     });
     withXlsx(function (X) {
       try {
