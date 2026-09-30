@@ -6,14 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const V34_PATH = path.join(HERE, '..', 'docs', 'source', 'order_analysis_v34.html');
+// v40 (2026-09-30 수령) — 계산 함수는 v34 와 글자까지 같습니다(테스트로 확인). 화면·Spectrum Map 만 바뀜
+export const V40_PATH = path.join(HERE, '..', 'docs', 'source', 'order_analysis_v40.html');
 
-const NAMES = ['parseCsv', 'safeMin', 'safeMax', 'analyzeStructure', 'noiseDbToPa', 'buildNormalizedModel', 'getMeta', 'normalizeMetaKey',
+export const NAMES = ['parseCsv', 'safeMin', 'safeMax', 'analyzeStructure', 'noiseDbToPa', 'buildNormalizedModel', 'getMeta', 'normalizeMetaKey',
   'isFiniteNumber', 'toNumber', 'median', 'mode', 'uniqueSorted', 'nearlyEqual', 'round', 'addCheck', 'formatNumber',
   'normalizeAmplitudeUnit', 'isDbScaleUnit', 'isDbaUnit', 'amplitudeUnit', 'aWeighting', 'convertAmplitude', 'detectedAmplitudeUnit',
   'getChannelTypeSettings', 'calculateOrderRows', 'orderAmplitudeToLinear', 'buildRssSumSeries', 'parseOrders'];
 
 // 이름으로 function 선언 하나를 중괄호 수를 세어 잘라냅니다
-function extract(src, name) {
+export function extract(src, name) {
   const start = src.indexOf('function ' + name + '(');
   if (start < 0) throw new Error('v34 에서 함수를 찾지 못함: ' + name);
   let i = src.indexOf('{', start), depth = 0;
@@ -25,8 +27,8 @@ function extract(src, name) {
 }
 
 // settings: v34 입력 칸 id → 값 (예: { noiseAmplitudeMode: 'db', noiseSourceDbReference: 2e-5, … })
-export function loadV34(settings = {}) {
-  const html = fs.readFileSync(V34_PATH, 'utf8');
+export function loadV34(settings = {}, htmlPath = V34_PATH) {
+  const html = fs.readFileSync(htmlPath, 'utf8');
   const body = NAMES.map(n => extract(html, n)).join('\n');
   const ids = Object.assign({
     noiseAmplitudeMode: 'db', noiseSourceDbReference: 2e-5, noiseOrderDbReference: 2e-5,

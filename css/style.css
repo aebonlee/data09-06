@@ -178,3 +178,19 @@ svg.chart { height: auto; }
 @media (min-width: 901px) { .map-range.cols-3 { grid-template-rows: repeat(2, auto); grid-auto-flow: column; } }
 /* 좁은 화면에서도 최소·최대는 한 줄에 둘 (파일 끝에 둬야 위의 1열 규칙을 이깁니다 — §9.7) */
 @media (max-width: 560px) { .form-grid.axis-range, .form-grid.map-range { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; } }
+
+/* 2026-09-30 4차 — 그래프 표시 옵션, 기여도 막대, CSV 인식 신호등(v40), 컬러맵 최대값(v40) */
+.graph-options { display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; margin: 2px 0 6px; }
+.graph-options-title { font-size: .9rem; margin-right: 4px; }
+.contrib-box[hidden] { display: none; }
+.contrib-box h3.mt { margin-top: 18px; }
+.recog-signal { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 9px 12px; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.recog-signal[hidden] { display: none; }
+.recog-signal .lights { display: inline-flex; gap: 6px; }
+.recog-signal .lights i { width: 16px; height: 16px; border-radius: 50%; background: #c8d0d8; opacity: .35; }
+.recog-signal .lights i.green { background: #20a66a; }
+.recog-signal .lights i.yellow { background: #e4ad24; }
+.recog-signal .lights i.red { background: #d84b4b; }
+.recog-signal[data-level="green"] .lights i.green, .recog-signal[data-level="yellow"] .lights i.yellow, .recog-signal[data-level="red"] .lights i.red { opacity: 1; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.25); }
+.map-max { font-weight: 700; margin: 6px 0 0; word-break: keep-all; overflow-wrap: break-word; }
+.map-max:empty { display: none; }

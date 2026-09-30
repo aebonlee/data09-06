@@ -49,7 +49,9 @@
     peakMin: 0,           // 피크 최소 진폭(이하 제외)
     energyAxis: 'hz',     // 'hz' | 'order'
     energyLo: '',         // 빈칸 = 처음부터
-    energyHi: ''          // 빈칸 = 끝까지
+    energyHi: '',         // 빈칸 = 끝까지
+    overallLo: '',        // Overall·기여도 계산 주파수 범위 시작(Hz) — 빈칸 = 측정 범위 처음부터 (2026-09-30 4차)
+    overallHi: ''         // 빈칸 = 측정 범위 끝까지
   };
 
   // ── CSV 읽기 ────────────────────────────────────────────────
@@ -614,6 +616,74 @@
     return { orders: tracks.map(function (t) { return t.order; }), points: pts };
   }
 
+  // ── Overall · 오더 기여도 (2026-09-30 4차, 제출자 요청 — v40 에는 없는 기능이라 표준 정의를 씀) ──
+  // Overall = 한 RPM 스펙트럼에서 지정 주파수 범위(기본: 측정 범위 전체) 칸들의 제곱합의 제곱근(RSS).
+  //   Testlab 스펙트럼 칸 값이 RMS 이므로 이 값이 그 범위의 전체(overall) RMS 레벨입니다.
+  //   창 함수 보정(해닝 1.5 등)은 넣지 않습니다 — 기여도는 분자·분모에 같은 보정이 붙어 비율이 변하지 않습니다.
+  // 오더 기여도(%) = 오더 에너지 ÷ Overall 에너지 × 100,  에너지 = 진폭²(제곱합).
+  //   오더 에너지는 오더 진폭(피크 ± 합산 범위 RSS)의 제곱 = 그 칸들의 제곱합입니다.
+  //   dBA 로 볼 때는 칸마다 A-가중한 에너지로 나눕니다(오더는 검출 피크 주파수에서 가중 — 오더 RSS 합산 dBA 와 같은 규칙).
+  // 기타(오더 외) = 100 − 오더 기여도 합. 오더 합산 창이 서로 겹치거나 Overall 범위 밖으로 나가면 합이 100 을 넘을 수 있어 경고합니다.
+  function overallOf(sp, lo, hi) {
+    var a0 = numOrNull(lo), b0 = numOrNull(hi);
+    var A = a0 == null ? -Infinity : a0, B = b0 == null ? Infinity : b0;
+    var ss = 0, ssA = 0, n = 0, fLo = null, fHi = null;
+    for (var i = 0; i < sp.freqs.length; i++) {
+      var f = sp.freqs[i], a = sp.amps[i];
+      if (!(f >= A && f <= B) || a == null || !isFinite(a)) continue;
+      ss += a * a;
+      var w = aWeighting(f);
+      if (isFinite(w)) ssA += a * a * Math.pow(10, w / 10);
+      if (fLo == null) fLo = f;
+      fHi = f; n++;
+    }
+    return { amp: n ? Math.sqrt(ss) : null, ampA: n ? Math.sqrt(ssA) : null, bins: n, lo: fLo, hi: fHi };
+  }
+  // 오더 한 점의 에너지 — weighted 이면 검출 피크 주파수의 A-가중을 곱합니다
+  function orderEnergy(p, weighted) {
+    if (!p || p.amp == null || !isFinite(p.amp)) return null;
+    if (!weighted) return p.amp * p.amp;
+    var w = aWeighting(p.freq);
+    return isFinite(w) ? p.amp * p.amp * Math.pow(10, w / 10) : null;
+  }
+  // tracks: analyzeGroup 의 오더 추적(점 순서 = spectra 순서), ts: 표시 설정
+  function contributions(spectra, tracks, ts, lo, hi) {
+    var weighted = ts.mode === 'dba';
+    return spectra.map(function (sp, i) {
+      var ov = overallOf(sp, lo, hi);
+      var amp = weighted ? ov.ampA : ov.amp;
+      var E = amp == null ? null : amp * amp;
+      var disp = weighted ? (amp > 0 && ts.ref > 0 ? 20 * Math.log10(amp / ts.ref) : null) : displayOf(ov.amp, null, ts.mode, ts.ref);
+      var parts = tracks.map(function (t) {
+        var p = t.points[i], e = orderEnergy(p, weighted);
+        var wLo = p && p.sumMin != null ? p.sumMin : p && p.freq, wHi = p && p.sumMax != null ? p.sumMax : p && p.freq;
+        return {
+          order: t.order, amp: p ? p.amp : null, disp: p ? p.disp : null, freq: p ? p.freq : null, energy: e,
+          share: e != null && E > 0 ? e / E * 100 : null, lo: wLo, hi: wHi,
+          outside: e != null && ov.bins > 0 && (wLo < ov.lo - 1e-9 || wHi > ov.hi + 1e-9)
+        };
+      });
+      var known = parts.filter(function (q) { return q.share != null; });
+      var sum = known.reduce(function (s, q) { return s + q.share; }, 0);
+      var complete = parts.length > 0 && known.length === parts.length;
+      // 합산 창 겹침 (주파수 순으로 늘어놓고 이웃과 비교)
+      var byLo = known.filter(function (q) { return q.lo != null; }).sort(function (x, y) { return x.lo - y.lo; });
+      var overlap = false;
+      for (var k = 1; k < byLo.length; k++) if (byLo[k].lo <= byLo[k - 1].hi + 1e-9) overlap = true;
+      return {
+        rpm: sp.rpm, overall: ov.amp, overallA: ov.ampA, energy: E, disp: disp, bins: ov.bins, lo: ov.lo, hi: ov.hi, weighted: weighted,
+        parts: parts, orderShare: complete ? sum : null, rest: complete ? 100 - sum : null, overlap: overlap,
+        outside: parts.some(function (q) { return q.outside; })
+      };
+    });
+  }
+  function overallLabel(s) {
+    var lo = String(s.overallLo == null ? '' : s.overallLo).trim(), hi = String(s.overallHi == null ? '' : s.overallHi).trim();
+    if (!lo && !hi) return '측정 범위 전체';
+    return (lo || '처음') + '~' + (hi || '끝') + ' Hz';
+  }
+  var CONTRIB_BASIS = { plain: '에너지(진폭²) 비율', weighted: 'A-가중 에너지 비율 (dBA 표시)' };
+
   // 파일 이름에서 관심 오더 짐작: 「130B-X 36,45order.csv」 → "36, 45"  (제출자 파일 이름 관례)
   function ordersFromName(name) {
     var m = String(name || '').match(/(\d+(?:\.\d+)?(?:\s*[,&+]\s*\d+(?:\.\d+)?)*)\s*(?:order|차)/i);
@@ -711,8 +781,16 @@
     });
     var emptyE = energy.filter(function (e) { return e.energy == null; }).length;
     if (emptyE) log.push({ level: '경고', line: '', message: g.channel + ' · ' + g.direction + ' — 에너지 합산 대역(' + bandLabel(s) + ')에 주파수 칸이 없는 RPM 이 ' + emptyE + '개 있습니다' });
+    var contrib = contributions(g.spectra, tracks, ts, s.overallLo, s.overallHi);
+    var noOv = contrib.filter(function (c) { return !c.bins; }).length;
+    var ovl = contrib.filter(function (c) { return c.overlap; }).length;
+    var outs = contrib.filter(function (c) { return c.outside; }).length;
+    if (noOv) log.push({ level: '경고', line: '', message: name + ' — Overall 범위(' + overallLabel(s) + ')에 주파수 칸이 없는 RPM 이 ' + noOv + '개 있어 기여도를 계산하지 않았습니다' });
+    if (ovl) log.push({ level: '경고', line: '', message: name + ' — ' + ovl + '개 RPM 에서 오더끼리 합산 창이 겹쳐 같은 칸이 두 번 들어갔습니다 — 오더 기여도 합이 실제보다 큽니다(합산 범위를 줄여 보세요)' });
+    if (outs) log.push({ level: '경고', line: '', message: name + ' — ' + outs + '개 RPM 에서 오더 합산 창이 Overall 범위(' + overallLabel(s) + ') 밖으로 나갑니다 — 그 오더 기여도는 Overall 에 없는 칸을 포함합니다' });
     return {
       group: g, ratio: ratio, halfWidth: hw, method: method, searchHz: sw, sumHz: uw, orders: orders, tracks: tracks, rssSum: rssSum,
+      contrib: contrib, overallRange: overallLabel(s), contribBasis: ts.mode === 'dba' ? CONTRIB_BASIS.weighted : CONTRIB_BASIS.plain,
       peaks: peaks, energy: energy, log: log, band: bandLabel(s),
       display: { mode: ts.mode, ref: ts.ref, unit: unitLabel(ts.mode, g.unit) }
     };
@@ -733,6 +811,30 @@
     if (!(t > 0)) t = 0; if (t > 1) t = 1;
     var x = t * (STOPS.length - 1), i = Math.min(Math.floor(x), STOPS.length - 2), f = x - i;
     return [0, 1, 2].map(function (c) { return Math.round(STOPS[i][c] + (STOPS[i + 1][c] - STOPS[i][c]) * f); });
+  }
+
+  // 컬러맵 보이는 범위의 최대값 칸 (v40 Spectrum Map 「MAX」 표시) — 동점이면 먼저 나온 칸(낮은 RPM·낮은 주파수)
+  // vals[k][i] = 표시값, xOf(s, i) = 가로축 값, rowIn(k) = 그 RPM 행이 보이는지
+  function mapMaxPoint(spectra, vals, xOf, x0, x1, rowIn) {
+    var best = null;
+    spectra.forEach(function (s, k) {
+      if (rowIn && !rowIn(k)) return;
+      for (var i = 0; i < s.freqs.length; i++) {
+        var v = vals[k][i], xv = xOf(s, i);
+        if (v == null || !isFinite(v) || xv < x0 || xv > x1) continue;
+        if (!best || v > best.value) best = { value: v, k: k, i: i, rpm: s.rpm, freq: s.freqs[i], xv: xv };
+      }
+    });
+    return best;
+  }
+
+  // CSV 인식 신호등 (v40 「CSV 데이터 인식 확인」) — 오류가 있으면 빨강, 경고만 있으면 노랑, 없으면 초록
+  function recognitionSignal(log, curveCount) {
+    var err = 0, warn = 0;
+    (log || []).forEach(function (x) { if (x.level === '오류') err++; else if (x.level === '경고') warn++; });
+    if (err) return { level: 'red', text: 'CSV 인식 오류', detail: '오류 ' + err + '건' + (warn ? ' · 경고 ' + warn + '건' : '') + ' — 경고 로그를 확인한 뒤 분석하세요', errors: err, warnings: warn };
+    if (warn) return { level: 'yellow', text: 'CSV 인식 확인 필요', detail: '경고 ' + warn + '건 — 내용을 확인한 뒤 분석할 수 있습니다', errors: 0, warnings: warn };
+    return { level: 'green', text: 'CSV 정상 인식', detail: '오류·경고 없음' + (curveCount ? ' · Curve ' + curveCount + '개 인식' : ''), errors: 0, warnings: 0 };
   }
 
   // 가장 가까운 값의 위치 (정렬된 배열)
@@ -808,6 +910,32 @@
     });
     return out;
   }
+  // 기여도 표 — 한 행 = 채널 × RPM, 오더마다 「표시 진폭 · 기여도(%)」 두 열 (raw=true 면 반올림하지 않은 숫자, 없는 값 null — XLSX 용)
+  function contribTable(results, raw) {
+    var orders = results.length ? results[0].orders : [];
+    var R = raw ? function (v) { return num(v); } : function (v, d) { return round(v, d); };
+    var head = ['채널', '위치', '방향', '종류', 'RPM', 'Overall 범위 하한_Hz', 'Overall 범위 상한_Hz', 'Overall 칸 수', 'Overall 내부값(선형 RSS)', 'Overall 표시값', '표시단위'];
+    orders.forEach(function (o) { head.push(o + '차 표시진폭', o + '차 기여도_%'); });
+    head.push('오더 합 기여도_%', '기타(오더 외)_%', '기여도 기준', '확인');
+    var out = [head];
+    results.forEach(function (res) {
+      var g = res.group;
+      (res.contrib || []).forEach(function (c) {
+        var row = [channelId(g), g.channel, g.direction || '', typeLabel(g), c.rpm, R(c.lo, 4), R(c.hi, 4), c.bins, R(c.weighted ? c.overallA : c.overall), R(c.disp), res.display.unit];
+        c.parts.forEach(function (q) { row.push(R(q.disp), R(q.share, 4)); });
+        var note = [];
+        if (c.overlap) note.push('합산 창 겹침');
+        if (c.outside) note.push('Overall 범위 밖 칸 포함');
+        if (!c.bins) note.push('Overall 범위에 칸 없음');
+        else if (c.orderShare == null) note.push('값 없는 오더 있음');
+        row.push(R(c.orderShare, 4), R(c.rest, 4), res.contribBasis + ' · ' + res.overallRange, note.join(', '));
+        out.push(raw ? row.map(function (v) { return v === '' ? null : v; }) : row);
+      });
+    });
+    return out;
+  }
+  function contribRows(results) { return contribTable(results, false); }
+  function xlsxContribRows(results) { return contribTable(results, true); }
   function logRows(log) {
     var out = [['구분', '원본 줄', '내용']];
     log.forEach(function (x) { out.push([x.level, x.line === 0 ? '' : x.line, x.message]); });
@@ -893,7 +1021,13 @@
       ['오더 대역 반폭 ±오더 (대역 방식)', n(s.halfWidth)],
       ['RPM 별 피크 개수 (이 도구)', n(s.peakTopN)],
       ['피크 최소 진폭 (이 도구)', n(s.peakMin)],
-      ['에너지 합산 대역 (이 도구)', bandLabel(s)]];
+      ['에너지 합산 대역 (이 도구)', bandLabel(s)],
+      ['RSS 합산 그래프 표시', m.showRss === false ? '숨김' : '표시'],
+      ['Spectrum Map 가로축 기준', m.mapAxis === 'order' ? 'Order' : 'Frequency'],
+      ['Overall 범위', overallLabel(s)],
+      ['기여도 기준', '오더 에너지 ÷ Overall 에너지 × 100 (에너지 = 진폭², dBA 는 A-가중 에너지)'],
+      ['Overall 그래프 표시', m.showOverall ? '표시' : '숨김'],
+      ['기여도 그래프 표시', m.showContrib ? '표시' : '숨김']];
   }
   // CSV 용 표(값은 이미 숫자, 없는 값은 '')를 시트에 쓸 때 '' 는 빈 칸(null)으로
   function numericCells(rows) {
@@ -904,6 +1038,7 @@
     var sheets = [{ name: 'Settings', rows: xlsxSettingsRows(settings, meta) }, { name: 'Order Analysis', rows: xlsxOrderAnalysisRows(results) }];
     var rss = xlsxRssRows(results);
     if (rss.length > 1) sheets.push({ name: 'Order RSS Sum', rows: rss });
+    sheets.push({ name: '기여도 분석', rows: xlsxContribRows(results) });   // 2026-09-30 4차 제출자 요청 — Overall·오더 기여도
     sheets.push({ name: '오더별 최대', rows: numericCells(orderMaxRows(results)) });
     sheets.push({ name: '피크 목록', rows: numericCells(peakRows(results)) });
     sheets.push({ name: '에너지 합산', rows: numericCells(energyRows(results)) });
@@ -943,6 +1078,9 @@
     if (!(Number(s.ratio) > 0)) return '회전비는 0보다 커야 합니다';
     if (!(String(s.searchHz).trim() !== '' && Number(s.searchHz) >= 0) || !(String(s.sumHz).trim() !== '' && Number(s.sumHz) >= 0)) return '피크 검색·합산 범위는 0 이상이어야 합니다';
     if (!['noiseRef', 'noiseSrcRef', 'vibRef', 'vibSrcRef'].every(function (k) { return Number(s[k]) > 0; })) return 'dB 기준값은 0보다 커야 합니다';
+    var oLo = String(s.overallLo == null ? '' : s.overallLo).trim(), oHi = String(s.overallHi == null ? '' : s.overallHi).trim();
+    if ((oLo && numOrNull(oLo) == null) || (oHi && numOrNull(oHi) == null)) return 'Overall 범위는 숫자(Hz)로 적거나 비워 두세요';
+    if (oLo && oHi && !(numOrNull(oHi) > numOrNull(oLo))) return 'Overall 범위 끝은 시작보다 커야 합니다';
     return null;
   }
   // 즉시 다시 계산을 기본으로 켤지 — 칸(주파수 × RPM × 채널) 수가 이보다 많으면 끕니다
@@ -967,6 +1105,8 @@
     trackOrderPeak: trackOrderPeak, freqStep: freqStep, rssOrders: rssOrders, ordersFromName: ordersFromName, METHOD_LABEL: METHOD_LABEL,
     xlsxOrderAnalysisRows: xlsxOrderAnalysisRows, xlsxRssRows: xlsxRssRows, xlsxSettingsRows: xlsxSettingsRows, workbookSheets: workbookSheets, channelId: channelId, sig4: sig4,
     resolveRange: resolveRange, clampNum: clampNum, numOrNull: numOrNull, CHART_HEIGHT: CHART_HEIGHT, validateSettings: validateSettings, LIVE_CELL_LIMIT: LIVE_CELL_LIMIT, cellCount: cellCount,
+    overallOf: overallOf, orderEnergy: orderEnergy, contributions: contributions, overallLabel: overallLabel, contribRows: contribRows, xlsxContribRows: xlsxContribRows,
+    recognitionSignal: recognitionSignal, mapMaxPoint: mapMaxPoint,
     trackRows: trackRows, rssRows: rssRows, peakRows: peakRows, orderMaxRows: orderMaxRows, energyRows: energyRows, logRows: logRows, toCsv: toCsv
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
