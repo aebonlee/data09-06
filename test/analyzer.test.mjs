@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const root = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
 const H = require('../js/hero.js');
+const HL = H.heroLayout;
 
 let passed = 0;
 function test(name, fn) {
@@ -49,10 +50,23 @@ function load(names) {
 const FIX_OLD = "    const channelIds=[...document.querySelectorAll('.multi-channel:checked')].map(x=>x.value);\n";
 const FIX_NEW = "    // [2026-09-30 수정] 채널 이름이 다른 CSV 를 새로 열면 이전 파일의 채널 체크가 남아 있어, 지금 파일에 없는 채널은 뺍니다.\n"
   + "    const channelIds=[...document.querySelectorAll('.multi-channel:checked')].map(x=>x.value).filter(id=>currentReport.normalized?.channels?.[id]);\n";
-test('js/script.js = 제출자 원본 script.js + 수정 한 곳(두 번째 CSV 채널 오류)', () => {
+// 2026-10-02 v52(「분석 실행」 버튼 · 접기 · Contribution Analysis 빈 상태)로 화면 연결 부분이 바뀌었다.
+// 계산 함수는 하나도 바꾸지 않았는지 — 원본의 함수 가운데 아래 목록 말고는 모두 바이트까지 같아야 한다.
+const V52_CHANGED = ['getMultiSelection', 'renderMultiWorkspace', 'initializeResizeObservers', 'syncSpectrumMapChannelOptions', 'renderMultiAnalysis', 'renderContributionAnalysis', 'setMapXAxisMode'];
+test('js/script.js — 원본 함수는 화면 연결 7곳 말고 모두 원본 그대로 (계산 함수 무수정)', () => {
   const orig = read('docs/source/order_analysis_v51/script.js');
   assert.equal(orig.split(FIX_OLD).length, 2, '원본에서 고칠 줄을 못 찾음');
-  assert.equal(script, orig.replace(FIX_OLD, FIX_NEW));
+  assert.ok(script.includes(FIX_NEW), '2026-09-30 수정 한 줄이 남아 있어야 함');
+  const names = [...new Set([...orig.matchAll(/\n  function (\w+)\(/g)].map((m) => m[1]))];
+  assert.ok(names.length > 100, '함수 수집이 너무 적음 ' + names.length);
+  // 지운 것: Raw dB 기준값을 칠 때마다 다시 계산하던 연결 함수 하나(이제 「분석 실행」이 rebuildNoiseNormalizedModel 을 부름)
+  const gone = names.filter((n) => !script.includes('\n  function ' + n + '('));
+  assert.deepEqual(gone, ['handleNoiseSourceDbReferenceChange']);
+  const changed = names.filter((n) => !gone.includes(n) && extract(orig, n) !== extract(script, n));
+  assert.deepEqual(changed.sort(), [...V52_CHANGED].sort());
+  for (const n of ['calculateOrderRows', 'calculateOverallRows', 'getContributionRows', 'buildRssSumSeries', 'convertAmplitude', 'drawCombinedOrderChart', 'renderMultiColorMap', 'rebuildNoiseNormalizedModel', 'buildNormalizedModel', 'downloadOrderAnalysisXlsx'])
+    assert.ok(names.includes(n) && !changed.includes(n), n);
+  for (const n of V52_CHANGED.filter((n) => n !== 'getMultiSelection')) assert.match(extract(script, n), /\[2026-10-02 v52\]/, n + ' 에 바꾼 표시가 없음');
 });
 test('css/style.css = 제출자 원본 style.css (바이트 같음)', () => {
   assert.equal(read('css/style.css'), read('docs/source/order_analysis_v51/style.css'));
@@ -63,9 +77,21 @@ test('index.html — 히어로 · 머리 태그 · 파일 경로만 바뀌고 �
     .replace(/\n<section class="hero"[\s\S]*?<\/section>\n<\/header>/, '</header>')
     .replace(/<meta name="description"[^>]*>\n\s*/, '')
     .replace(/<link rel="icon"[^>]*>\n\s*/, '')
-    .replace('<link rel="stylesheet" href="css/style.css" />\n  <link rel="stylesheet" href="css/hero.css" />', '<link rel="stylesheet" href="style.css" />')
+    .replace('<link rel="stylesheet" href="css/style.css" />\n  <link rel="stylesheet" href="css/hero.css" />\n  <link rel="stylesheet" href="css/panels.css" />', '<link rel="stylesheet" href="style.css" />')
     .replace('<script src="js/script.js"></script>\n<script src="js/hero.js"></script>', '<script src="script.js"></script>');
-  assert.equal(strip(html), orig);
+  // v52: 세 영역 머리(접기 버튼) · 「분석 실행」 줄 · Contribution Analysis 카드(예전 <details>) 를 걷어 내면 원본과 같은 줄만 남는다
+  const keep = (t) => t.split('\n').map((l) => l.trim()).filter(Boolean);
+  const origLines = keep(orig), cur = keep(strip(html));
+  const added = cur.filter((l) => !origLines.includes(l));
+  const removed = origLines.filter((l) => !cur.includes(l));
+  const allowedAdd = /collapsible|section-toggle|card-head-actions|run-row|run-button|run-stale|run-help|Contribution Analysis|^<\/div>$|^<div>$|^<div class="toolbar">$|^<\/section>$|^<h2 style="margin:0">Spectrum Map<\/h2>$|advanced-settings" open|선택한 Order 성분의 에너지 기여율|^<button id="downloadOrderAnalysisXlsx"/;
+  assert.deepEqual(added.filter((l) => !allowedAdd.test(l)), []);
+  const allowedRemove = /^<section class="card" id="(focusedAnalysis|multiColorMapSection)">$|^<h2>Spectrum Map<\/h2>$|^<details class="advanced-settings">$|order-subsection|차수별 기여도 분석|^<\/details>$|^<summary class="order-subsection-summary">$|^<\/summary>$|^<span>차수별 기여도 분석<\/span>$|summary-help|^<h2 style="margin:0">차수별 기여도 분석<\/h2>$|^<button id="downloadOrderAnalysisXlsx"/;
+  assert.deepEqual(removed.filter((l) => !allowedRemove.test(l)), []);
+  // 원본의 id 는 하나도 빠지지 않음
+  const ids = (t) => new Set([...t.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+  const now = ids(html);
+  assert.deepEqual([...ids(orig)].filter((id) => !now.has(id)), []);
 });
 
 // ② 문법 · 파일 · 화면 요소
@@ -83,8 +109,7 @@ test('분석기가 찾는 id 가 index.html 에 모두 있음 (히어로를 넣�
   const missingIn = (page) => { const have = new Set([...page.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1])); return [...ids].filter((id) => !have.has(id)); };
   assert.ok(ids.size > 80, 'id 수집이 너무 적음 ' + ids.size);
   // 원본에도 없던 id(combinedChartControls — 코드에서 없으면 건너뜀)는 그대로 두고, 새로 빠진 것이 없어야 함
-  assert.deepEqual(missingIn(html), missingIn(read('docs/source/order_analysis_v51/index.html')));
-  assert.ok(missingIn(html).length <= 1, missingIn(html).join(','));
+  assert.deepEqual(missingIn(html), ['combinedChartControls']);
 });
 test('id 가 겹치지 않음 (히어로 id 가 분석기 id 와 부딪히지 않음)', () => {
   const all = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
@@ -181,7 +206,8 @@ test('소음 등고선 띠 — 안쪽일수록 큰 소리(색 위쪽) · 반지�
   for (let i = 1; i < g.length; i++) { assert.ok(g[i].r > g[i - 1].r); assert.ok(g[i].t < g[i - 1].t); }
 });
 test('전동 지게차 그림 — 배기관 없음, 좌석 아래 배터리 · 구동 모터 · 기어박스에 센서, 가상 값 표기', () => {
-  const svg = html.slice(html.indexOf('<svg id="heroForklift"'), html.indexOf('</svg>'));
+  const svg = html.slice(html.indexOf('<g id="heroElectric">'), html.indexOf('<!-- ② 엔진식'));
+  assert.ok(svg.length > 1000, '전동식 묶음을 못 찾음');
   assert.doesNotMatch(svg, /배기관 -->|엔진/);
   assert.match(svg, /배터리 칸/);
   assert.match(svg, /구동 모터/);
@@ -190,6 +216,40 @@ test('전동 지게차 그림 — 배기관 없음, 좌석 아래 배터리 · �
   const m = svg.match(/<rect id="heroSensor" x="([\d.]+)" y="([\d.]+)"/);
   assert.ok(m && +m[1] > 150 && +m[1] < 196 && +m[2] > 150, '센서 위치 ' + (m && m.slice(1)));
   assert.match(html, /임의로 정한 가상 값/);
+});
+test('엔진식 지게차 그림 — 배기관 · 엔진 덮개 통풍구 · 라디에이터 그릴 · 엔진 블록 센서, 「전동식」「엔진식」 이름표', () => {
+  const eng = html.slice(html.indexOf('<g id="heroEngine"'), html.indexOf('</svg>'));
+  assert.ok(eng.length > 1000, '엔진식 묶음을 못 찾음');
+  for (const w of ['배기관', '라디에이터 그릴', '엔진 덮개', '엔진 블록', 'hero-smoke', 'id="heroEngineBody"']) assert.ok(eng.includes(w), w);
+  assert.doesNotMatch(eng, /배터리/);
+  // 엔진식은 전동식 오른쪽(겹치지 않게 380 만큼 옮김), 센서는 엔진 블록(164~198) 위
+  assert.match(eng, /<g id="heroEngine" transform="translate\(380 0\)">/);
+  const m = eng.match(/<rect id="heroSensorEngine" x="([\d.]+)" y="([\d.]+)"/);
+  assert.ok(m && +m[1] >= 164 && +m[1] <= 198 && +m[2] > 150, '엔진 센서 위치 ' + (m && m.slice(1)));
+  assert.match(html, /hero-fleet-label-electric">전동식</);
+  assert.match(html, /hero-fleet-label-engine">엔진식</);
+});
+test('히어로 칸 나누기 — 지게차 묶음 비율 720:250 유지 · 선도와 겹치지 않음 · 그림 안', () => {
+  for (const [W, H] of [[1272, 403], [1062, 330], [707, 359], [738, 307], [354, 336], [300, 285]]) {
+    const g = HL(W, H);
+    assert.ok(Math.abs(g.fleet.w / g.fleet.h - 720 / 250) < 1e-9, W + ' 비율');
+    assert.ok(g.fleet.x >= 0 && g.fleet.y >= 0 && g.fleet.x + g.fleet.w <= W + 0.5 && g.fleet.y + g.fleet.h <= H + 0.5, W + ' 그림 밖');
+    if (g.stacked) assert.ok(g.fleet.y + g.fleet.h < g.plot.top, W + ' 위아래 겹침');
+    else assert.ok(g.fleet.x + g.fleet.w < g.plot.left, W + ' 좌우 겹침');
+    assert.ok(g.plot.right - g.plot.left > 150 && g.plot.bottom - g.plot.top > 120, W + ' 선도가 너무 작음 ' + JSON.stringify(g.plot));
+    assert.equal(g.stacked, W / H < 1.5);
+  }
+});
+test('두 센서 소음 등고선 — 센서 가까이가 안쪽 띠, 멀면 바깥(-1), 엔진식(+2.5 dB)이 더 넓게 퍼짐', () => {
+  const src = [{ x: 100, y: 100, gainDb: 0 }, { x: 400, y: 100, gainDb: 2.5 }];
+  assert.equal(H.noiseBand(src, 100, 100, 400), 0);
+  assert.equal(H.noiseBand(src, 5000, 5000, 400), -1);
+  // 같은 거리라면 엔진식 쪽 띠 번호가 같거나 더 작음(더 큰 소리)
+  const left = H.noiseBand(src, 100 - 120, 100, 400), right = H.noiseBand(src, 400 + 120, 100, 400);
+  assert.ok(right <= left && right >= 0, left + ' / ' + right);
+  // 띠 번호는 멀어질수록 커짐(단조)
+  let prev = 0;
+  for (let d = 0; d < 900; d += 15) { const b = H.noiseBand([src[0]], 100 + d, 100, 400); const v = b < 0 ? 99 : b; assert.ok(v >= prev, 'd=' + d); prev = v; }
 });
 test('움직임 줄이기 · 탭 숨김 · 화면 밖이면 멈춤', () => {
   assert.match(heroJs, /prefers-reduced-motion: reduce/);

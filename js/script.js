@@ -21,8 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem('orderAnalysisTheme', dark ? 'dark' : 'light');
     updateThemeButton();
     if (currentReport) {
-      try { renderMultiAnalysis(); } catch (e) {}
-      try { renderMultiColorMap(); } catch (e) {}
+      // [2026-10-02 v52] 다시 그릴 때는 마지막으로 「분석 실행」한 입력값으로
+      try { withAppliedInputs(renderMultiAnalysis); } catch (e) {}
+      try { withAppliedInputs(renderMultiColorMap); } catch (e) {}
     }
   });
 
@@ -66,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (errors > 0) return;
     $('csvPreview').classList.add('hidden');
     renderReport(currentReport);
+    commitRunInputs(); // [2026-10-02 v52] 새 파일 분석 = 지금 입력값 전체를 「실행한 값」으로
     csvUploadSection.classList.add('collapsed');
     csvUploadToggle.textContent = '업로드 영역 열기';
     csvUploadToggle.setAttribute('aria-expanded', 'false');
@@ -108,25 +110,38 @@ document.addEventListener('DOMContentLoaded', () => {
   $('mapMinFreq').addEventListener('input', renderColorMap);
   $('mapMaxFreq').addEventListener('input', renderColorMap);
   window.addEventListener('resize', debounce(() => { renderOrderCharts(); renderColorMap(); }, 100));
-  ['multiOrderInput','multiSearchWidth','multiSumWidth','noiseOrderDbReference','vibrationSourceDbReference','vibrationOrderDbReference'].forEach(id => {
-    $(id).addEventListener('input', () => { renderMultiAnalysis(); if(id==='multiSearchWidth') renderMultiColorMap(); });
+  // [2026-10-02 v52] 입력을 바꿔도 바로 다시 계산하지 않습니다 — 「분석 실행」 버튼(또는 Enter)을 누를 때만 계산합니다.
+  //   (큰 파일에서 글자를 칠 때마다 다시 계산해 느려지던 문제, 2026-10-02 요청) 입력이 바뀌면 「입력이 바뀌었습니다」 표시.
+  //   예전에 입력마다 걸려 있던 것: 오더 · 피크 범위 · 단위 · dB 기준값 · 그래프 표시 · 축 범위 → renderMultiAnalysis,
+  //   Raw dB 기준값 → rebuildNoiseNormalizedModel, 기여도 채널 → renderContributionAnalysis, Spectrum Map 입력 → renderMultiColorMap.
+  document.addEventListener('input', updateRunStale);
+  document.addEventListener('change', updateRunStale);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target.tagName !== 'INPUT' || !['text','number'].includes(event.target.type)) return;
+    const section = Object.keys(RUN_KEYS).find(name => RUN_KEYS[name].includes(event.target.id));
+    if (!section) return;
+    event.preventDefault();
+    runSection(section);
   });
-  function handleNoiseSourceDbReferenceChange() {
-    rebuildNoiseNormalizedModel();
-  }
-  $('noiseSourceDbReference').addEventListener('input', handleNoiseSourceDbReferenceChange);
-  $('noiseSourceDbReference').addEventListener('change', handleNoiseSourceDbReferenceChange);
-  ['noiseAmplitudeMode','vibrationAmplitudeMode'].forEach(id => $(id).addEventListener('change', renderMultiAnalysis));
-  $('showOverall').addEventListener('change', renderMultiAnalysis);
-  $('showRssSum').addEventListener('change', renderMultiAnalysis);
-  $('contributionChannelSelect').addEventListener('change', renderContributionAnalysis);
-  $('downloadOrderAnalysisXlsx').addEventListener('click', downloadOrderAnalysisXlsx);
-  $('selectAllChannels').addEventListener('click', () => { document.querySelectorAll('.multi-channel').forEach(x => x.checked=true); renderMultiAnalysis(); });
-  $('clearChannels').addEventListener('click', () => { document.querySelectorAll('.multi-channel').forEach(x => x.checked=false); renderMultiAnalysis(); });
-  window.addEventListener('resize', debounce(() => { renderMultiAnalysis(); fitCompactKpiText(); }, 120));
-  $('combinedOrderCanvas').addEventListener('mousemove',event=>{if(!combinedPlotPoints.length||!combinedChartSelection)return;const rect=$('combinedOrderCanvas').getBoundingClientRect(),mx=event.clientX-rect.left,my=event.clientY-rect.top;let nearest=null,dmin=Infinity;for(const p of combinedPlotPoints){const d=Math.hypot(p.canvasX-mx,p.canvasY-my);if(d<dmin){nearest=p;dmin=d;}}combinedHoverPoint=dmin<=22?nearest:null;$('combinedOrderCanvas').style.cursor=combinedHoverPoint?'crosshair':'default';drawCombinedOrderChart(combinedChartSeries,combinedChartSelection);});
-  $('combinedOrderCanvas').addEventListener('mouseleave',()=>{combinedHoverPoint=null;$('combinedOrderCanvas').style.cursor='default';if(combinedChartSelection)drawCombinedOrderChart(combinedChartSeries,combinedChartSelection);});
-  ['graphRpmMin','graphRpmMax','graphAmpMin','graphAmpMax'].forEach(id => $(id).addEventListener('input', renderMultiAnalysis));
+  $('runOrderAnalysis').addEventListener('click', () => runSection('order'));
+  $('runContribution').addEventListener('click', () => runSection('contribution'));
+  $('runSpectrumMap').addEventListener('click', () => runSection('map'));
+  [['orderAnalysisToggle','focusedAnalysis','Order Analysis'],['contributionToggle','orderContributionSection','Contribution Analysis'],['spectrumMapToggle','multiColorMapSection','Spectrum Map']].forEach(([buttonId, cardId, name]) => {
+    $(buttonId).addEventListener('click', () => {
+      const collapsed = $(cardId).classList.toggle('is-collapsed');
+      $(buttonId).setAttribute('aria-expanded', String(!collapsed));
+      $(buttonId).setAttribute('aria-label', name + (collapsed ? ' 펼치기' : ' 접기'));
+      $(buttonId).textContent = collapsed ? '펼치기' : '접기';
+      // 접혀 있는 동안 폭 0 으로 그려진 기여도 차트를 펼칠 때 다시 그림(그래프 · Spectrum Map 은 크기 감시가 다시 그림)
+      if (!collapsed && cardId === 'orderContributionSection' && currentReport) withAppliedInputs(renderContributionAnalysis);
+    });
+  });
+  $('downloadOrderAnalysisXlsx').addEventListener('click', () => withAppliedInputs(downloadOrderAnalysisXlsx));
+  $('selectAllChannels').addEventListener('click', () => { document.querySelectorAll('.multi-channel').forEach(x => x.checked=true); updateRunStale(); });
+  $('clearChannels').addEventListener('click', () => { document.querySelectorAll('.multi-channel').forEach(x => x.checked=false); updateRunStale(); });
+  window.addEventListener('resize', debounce(() => { withAppliedInputs(renderMultiAnalysis); fitCompactKpiText(); }, 120));
+  $('combinedOrderCanvas').addEventListener('mousemove',event=>{if(!combinedPlotPoints.length||!combinedChartSelection)return;const rect=$('combinedOrderCanvas').getBoundingClientRect(),mx=event.clientX-rect.left,my=event.clientY-rect.top;let nearest=null,dmin=Infinity;for(const p of combinedPlotPoints){const d=Math.hypot(p.canvasX-mx,p.canvasY-my);if(d<dmin){nearest=p;dmin=d;}}combinedHoverPoint=dmin<=22?nearest:null;$('combinedOrderCanvas').style.cursor=combinedHoverPoint?'crosshair':'default';withAppliedInputs(()=>drawCombinedOrderChart(combinedChartSeries,combinedChartSelection));});
+  $('combinedOrderCanvas').addEventListener('mouseleave',()=>{combinedHoverPoint=null;$('combinedOrderCanvas').style.cursor='default';if(combinedChartSelection)withAppliedInputs(()=>drawCombinedOrderChart(combinedChartSeries,combinedChartSelection));});
   
   $('mapChannelSelect').addEventListener('change', () => {
     const channel = currentReport?.normalized?.channels?.[$('mapChannelSelect').value];
@@ -138,11 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateMapColorAxisInputs();
     spectrumMapHover = null;
     spectrumMapGeometry = null;
-    requestAnimationFrame(() => renderMultiColorMap());
+    updateRunStale(); // [2026-10-02 v52] 축 범위만 새 채널에 맞춰 채우고, 그리기는 「분석 실행」 때
   });
-  $('mapMinFrequency').addEventListener('input', renderMultiColorMap);
-  $('mapMaxFrequency').addEventListener('input', renderMultiColorMap);
-  $('mapOrderOverlayInput').addEventListener('input', renderMultiColorMap);
   
   function setMapXAxisMode(mode) {
     mapXAxisMode = mode === 'order' ? 'order' : 'frequency';
@@ -156,31 +168,109 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentReport) {
       if (mapXAxisMode === 'order') initializeMapOrderAxisInputs();
       else setMapFrequencyRangeFromData();
-      renderMultiColorMap();
+      updateRunStale(); // [2026-10-02 v52] 그리기는 「분석 실행」 때
     }
   }
   
   $('mapFrequencyAxisButton').addEventListener('click', () => setMapXAxisMode('frequency'));
   $('mapOrderAxisButton').addEventListener('click', () => setMapXAxisMode('order'));
-  ['mapMinOrder','mapMaxOrder'].forEach(id => $(id).addEventListener('input', renderMultiColorMap));
   $('mapOrderOverlayEnabled').addEventListener('change', () => {
     const enabled = $('mapOrderOverlayEnabled').checked;
     $('mapOrderOverlaySettings').classList.toggle('hidden', !enabled);
-    renderMultiColorMap();
   });
-  ['mapRpmMin','mapRpmMax','mapAmpMin','mapAmpMax'].forEach(id => $(id).addEventListener('input', renderMultiColorMap));
   $('multiColorMapCanvas').addEventListener('mousemove', event => {
     const rect=$('multiColorMapCanvas').getBoundingClientRect();
     spectrumMapHover={x:event.clientX-rect.left,y:event.clientY-rect.top};
     $('multiColorMapCanvas').style.cursor='crosshair';
-    renderMultiColorMap();
+    withAppliedInputs(renderMultiColorMap);
   });
   $('multiColorMapCanvas').addEventListener('mouseleave', () => {
     spectrumMapHover=null;
     $('multiColorMapCanvas').style.cursor='default';
-    renderMultiColorMap();
+    withAppliedInputs(renderMultiColorMap);
   });
-  window.addEventListener('resize', debounce(renderMultiColorMap, 120));
+  window.addEventListener('resize', debounce(() => withAppliedInputs(renderMultiColorMap), 120));
+
+  // [2026-10-02 v52] 「분석 실행」 — 영역마다 그 영역의 입력만 반영합니다.
+  //   다른 영역의 입력이 바뀌어 있으면(아직 실행 전) 그 영역은 마지막으로 실행한 값으로 그립니다.
+  //   창 크기 · 마우스 · 다크모드처럼 저절로 다시 그릴 때도 마지막으로 실행한 값을 씁니다(withAppliedInputs).
+  //   계산 함수(renderMultiAnalysis · renderContributionAnalysis · renderMultiColorMap)는 그대로 — 같은 입력이면 결과가 예전과 같습니다.
+  const RUN_KEYS = {
+    order: ['@channels','multiOrderInput','multiSearchWidth','multiSumWidth','showOverall','showRssSum','noiseAmplitudeMode','noiseSourceDbReference','noiseOrderDbReference','vibrationAmplitudeMode','vibrationSourceDbReference','vibrationOrderDbReference','graphRpmMin','graphRpmMax','graphAmpMin','graphAmpMax'],
+    contribution: ['contributionChannelSelect'],
+    map: ['mapChannelSelect','@mapXAxisMode','mapOrderOverlayEnabled','mapOrderOverlayInput','mapMinFrequency','mapMaxFrequency','mapMinOrder','mapMaxOrder','mapRpmMin','mapRpmMax','mapAmpMin','mapAmpMax']
+  };
+  const RUN_STALE = { order: 'orderStale', contribution: 'contributionStale', map: 'mapStale' };
+  const ALL_RUN_KEYS = Object.values(RUN_KEYS).flat();
+  let appliedInputs = null, appliedDepth = 0;
+  function readRunKey(key) {
+    if (key === '@channels') return [...document.querySelectorAll('.multi-channel:checked')].map(x => x.value).join('\n');
+    if (key === '@mapXAxisMode') return mapXAxisMode;
+    const el = $(key);
+    return el.type === 'checkbox' ? String(el.checked) : el.value;
+  }
+  function writeRunKey(key, value) {
+    if (key === '@channels') { const set = new Set(value ? value.split('\n') : []); document.querySelectorAll('.multi-channel').forEach(x => { x.checked = set.has(x.value); }); return; }
+    if (key === '@mapXAxisMode') { mapXAxisMode = value; return; }
+    const el = $(key);
+    if (el.type === 'checkbox') el.checked = value === 'true'; else el.value = value;
+  }
+  function commitRunInputs() {
+    appliedInputs = {};
+    ALL_RUN_KEYS.forEach(key => { appliedInputs[key] = readRunKey(key); });
+    updateRunStale();
+  }
+  function updateRunStale() {
+    for (const [section, keys] of Object.entries(RUN_KEYS)) {
+      const stale = !!appliedInputs && !!currentReport && keys.some(key => readRunKey(key) !== appliedInputs[key]);
+      $(RUN_STALE[section]).hidden = !stale;
+    }
+  }
+  // fn 을 「마지막으로 실행한 입력값」으로 돌립니다. runSection 영역의 입력은 지금 값 그대로 쓰고 그 값을 실행한 값으로 남깁니다.
+  function withAppliedInputs(fn, runSectionName) {
+    if (!appliedInputs || appliedDepth > 0) return fn();
+    const own = new Set(runSectionName ? RUN_KEYS[runSectionName] : []);
+    const pending = new Map();
+    const active = document.activeElement;
+    let caret = null;
+    try { caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null; } catch (e) { caret = null; }
+    for (const key of ALL_RUN_KEYS) {
+      if (own.has(key)) continue;
+      const now = readRunKey(key);
+      if (now !== appliedInputs[key]) { pending.set(key, now); writeRunKey(key, appliedInputs[key]); }
+    }
+    appliedDepth++;
+    try { return fn(); }
+    finally {
+      appliedDepth--;
+      const restored = new Set();
+      for (const [key, value] of pending) {
+        // 그리는 도중 코드가 값을 바꾸지 않았으면(예: 채널 목록이 그대로) 사용자가 친 값을 되돌려 놓음
+        if (readRunKey(key) !== appliedInputs[key]) continue;
+        writeRunKey(key, value);
+        if (readRunKey(key) === value) restored.add(key); else writeRunKey(key, appliedInputs[key]);
+      }
+      for (const key of ALL_RUN_KEYS) if (!restored.has(key)) appliedInputs[key] = readRunKey(key);
+      if (caret && document.activeElement === active) { try { active.setSelectionRange(caret[0], caret[1]); } catch (e) {} }
+      updateRunStale();
+    }
+  }
+  function runSection(name) {
+    if (!currentReport) return;
+    if (name === 'order') {
+      // Raw 데이터 dB 기준값이 바뀌었으면 예전처럼 소음 정규화 모델부터 다시 계산(그 안에서 그래프도 다시 그림)
+      const sourceRef = Number($('noiseSourceDbReference').value);
+      const sourceChanged = appliedInputs && readRunKey('noiseSourceDbReference') !== appliedInputs.noiseSourceDbReference;
+      withAppliedInputs(() => {
+        if (sourceChanged && sourceRef > 0 && Number.isFinite(sourceRef)) rebuildNoiseNormalizedModel();
+        else renderMultiAnalysis();
+      }, 'order');
+    } else if (name === 'contribution') {
+      withAppliedInputs(renderContributionAnalysis, 'contribution');
+    } else {
+      withAppliedInputs(renderMultiColorMap, 'map');
+    }
+  }
 
   function setStatus(message, type = '', loading = false) {
     status.className = 'status-line' + (type ? ' ' + type : '');
@@ -845,14 +935,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       return `<section class="channel-group ${group.type}"><div class="channel-group-header"><div class="channel-group-title"><span>${group.title}</span><span class="channel-group-count">${ids.length}</span></div><div class="channel-group-actions"><button class="secondary group-select" data-channel-type="${group.type}" type="button">전체</button><button class="secondary group-clear" data-channel-type="${group.type}" type="button">해제</button></div></div><div class="channel-group-items">${items}</div></section>`;
     }).join('');
-    document.querySelectorAll('.multi-channel').forEach(el=>el.addEventListener('change',renderMultiAnalysis));
+    // [2026-10-02 v52] 채널 체크는 「분석 실행」 때 반영(체크 변화는 문서 전체의 change 감시가 「입력이 바뀌었습니다」로 표시)
     document.querySelectorAll('.group-select').forEach(button=>button.addEventListener('click',()=>{
       document.querySelectorAll(`.multi-channel[data-channel-type="${button.dataset.channelType}"]`).forEach(input=>input.checked=true);
-      renderMultiAnalysis();
+      updateRunStale();
     }));
     document.querySelectorAll('.group-clear').forEach(button=>button.addEventListener('click',()=>{
       document.querySelectorAll(`.multi-channel[data-channel-type="${button.dataset.channelType}"]`).forEach(input=>input.checked=false);
-      renderMultiAnalysis();
+      updateRunStale();
     }));
     if (!document.querySelector('.multi-channel:checked')) {
       const firstChannel = document.querySelector('.multi-channel');
@@ -871,8 +961,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function initializeResizeObservers() {
     if (resizeObserversInitialized || typeof ResizeObserver==='undefined') return;
     resizeObserversInitialized=true;
-    const redrawOrder=debounce(renderMultiAnalysis,80);
-    const redrawMap=debounce(renderMultiColorMap,80);
+    const redrawOrder=debounce(()=>withAppliedInputs(renderMultiAnalysis),80); // [2026-10-02 v52] 마지막으로 실행한 값으로
+    const redrawMap=debounce(()=>withAppliedInputs(renderMultiColorMap),80);
     new ResizeObserver(redrawOrder).observe($('orderGraphFrame'));
     new ResizeObserver(redrawMap).observe($('spectrumMapFrame'));
   }
@@ -1063,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderMultiAnalysis() {
     if(!currentReport)return;
     const sel=getMultiSelection();
-    const orderOutputElements=[$('multiKpis'),$('combinedLegend'),$('orderGraphFrame'),$('combinedChartControls'),$('orderGraphNote'),$('orderContributionSection')].filter(Boolean);
+    const orderOutputElements=[$('multiKpis'),$('combinedLegend'),$('orderGraphFrame'),$('combinedChartControls'),$('orderGraphNote')].filter(Boolean); // [2026-10-02 v52] Contribution Analysis 는 숨기지 않고 빈 상태 안내
     if(!sel){
       multiAnalysisRows=[];
       orderOutputElements.forEach(el=>el.classList.add('analysis-output-hidden'));
@@ -1241,7 +1331,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!section || !currentReport) return;
     const sel=getMultiSelection();
     if (!sel || sel.orders.length<2) {
-      section.classList.add('analysis-output-hidden');
+      // [2026-10-02 v52] 오더를 넣기 전에도 영역을 보여 주고 무엇을 하면 되는지 안내(예전에는 숨김)
+      section.classList.remove('analysis-output-hidden');
+      $('contributionSummary').innerHTML='<div class="contribution-kpi"><span class="label">상태</span><span class="value">'+(sel?'오더 2개 이상 필요':'채널 선택 필요')+'</span></div>';
+      $('contributionLegend').innerHTML=''; $('contributionTableHead').innerHTML=''; $('contributionTableBody').innerHTML='';
+      $('contributionNote').textContent=sel
+        ? 'Order Analysis 의 「오더 입력」에 오더를 2개 이상(예: 30, 36, 42) 넣고 「분석 실행」을 누르면 RPM 별 차수 기여도가 여기에 나옵니다.'
+        : 'Order Analysis 에서 채널을 하나 이상 고르고 오더를 2개 이상 넣은 뒤 「분석 실행」을 누르면 RPM 별 차수 기여도가 여기에 나옵니다.';
+      drawContributionChart([],[]);
       return;
     }
     section.classList.remove('analysis-output-hidden');
@@ -1427,7 +1524,7 @@ dBA 모드에서는 각 차수의 실제 피크 주파수에 A-weighting을 적�
     updateMapColorAxisInputs();
     spectrumMapHover = null;
     spectrumMapGeometry = null;
-    requestAnimationFrame(() => renderMultiColorMap());
+    requestAnimationFrame(() => withAppliedInputs(renderMultiColorMap)); // [2026-10-02 v52]
   }
 
   function initializeMapChannelOptions(report) {

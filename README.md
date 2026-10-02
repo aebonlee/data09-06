@@ -1,12 +1,12 @@
 # data09-06 · 소음진동 오더 분석 도구 (Order Analysis v51)
 
-Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 RPM 별 오더 진폭 · Overall · 차수별 기여도 · Spectrum Map 을 브라우저 안에서 계산하는 제출자 분석기 v51 에 전동 지게차 그림과 가상 캠벨 선도 컨투어 첫 화면을 더한 도구
+Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 RPM 별 오더 진폭 · Overall · 차수별 기여도 · Spectrum Map 을 브라우저 안에서 계산하는 제출자 분석기 v51 에 지게차(전동식 · 엔진식) 그림과 가상 캠벨 선도 컨투어 첫 화면, 영역별 「분석 실행」 버튼을 더한 도구
 
 | 항목 | 내용 |
 |---|---|
 | 제출자 | 조윤제 |
 | 과정 | 현장 데이터 수집·디지털화 전문가과정 1차수 (2026) |
-| 진행 단계 | 1단계 개발 완료 (2026-09-28) · 2차 — 제출자 분석기 v34·실제 Testlab Neo 파일 반영 · 3차(2026-09-29) — v34 의 XLSX 저장·축 범위·높이 조절·끌어 놓기·즉시 다시 계산 · 4차(2026-09-30) — 분석기 v40 기준 RPM 별 Overall·오더 기여도(그래프·표시 옵션·XLSX 시트) · 5차(2026-09-30) — data09-29(제출자 분석기 v51 + 전동 지게차 첫 화면) 통합, 두 번째 CSV 채널 오류 수정 — https://aebonlee.github.io/data09-06/ |
+| 진행 단계 | 1단계 개발 완료 (2026-09-28) · 2차 — 제출자 분석기 v34·실제 Testlab Neo 파일 반영 · 3차(2026-09-29) — v34 의 XLSX 저장·축 범위·높이 조절·끌어 놓기·즉시 다시 계산 · 4차(2026-09-30) — 분석기 v40 기준 RPM 별 Overall·오더 기여도(그래프·표시 옵션·XLSX 시트) · 5차(2026-09-30) — data09-29(제출자 분석기 v51 + 전동 지게차 첫 화면) 통합, 두 번째 CSV 채널 오류 수정 · 6차(2026-10-02) — 첫 화면 그림 높이를 글 묶음에 맞춤 · 엔진식 지게차 추가 · 업로드 칸 절반 · Contribution Analysis 상시 표시 · 세 영역 접기 · 「분석 실행」 버튼 — https://aebonlee.github.io/data09-06/ |
 | 다음 개발 | 여러 시험 비교(한 그래프에 겹치기), 원하면 분석 뒤 첫 화면을 올린 CSV 의 실제 Spectrum Map 으로 |
 
 > **2026-09-30 통합** — 따로 만들었던 [data09-29](https://github.com/aebonlee/data09-29)(분석기 v51 + 지게차 첫 화면)를 제출자 답변 「06번 분석기의 업데이트 버전이므로 합쳐도 좋습니다. 전동식이 좋으며, 자주 보는 오더/공진주파수는 따로 없으므로 임의로 지정해도 좋습니다. 에러가 발생한다면 수정 부탁드립니다.」에 따라 이 리포로 합쳤습니다.
@@ -27,22 +27,23 @@ Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 RPM 별 오더 진�
 
 1. 첫 화면의 **「CSV 파일 선택」** 또는 아래 업로드 칸에 Testlab Neo CSV 를 끌어 놓기
 2. 인식 신호등 · Curve 표를 확인하고 **「분석 실행」**
-3. 채널 · 오더(예: `1, 2, 4`)를 고르면 Order Analysis 그래프, 「차수별 기여도 분석」을 펼치면 기여도, 아래 Spectrum Map
+3. 채널 · 오더(예: `1, 2, 4`)를 고르고 Order Analysis 의 **「분석 실행」**(또는 입력 칸에서 Enter) → 그래프 · Contribution Analysis(차수별 기여도) · Spectrum Map 이 함께 다시 계산됩니다. 입력을 바꾸기만 하면 다시 계산하지 않고 「입력이 바뀌었습니다 — 분석 실행을 눌러 주세요」가 뜹니다(큰 파일에서 글자 칠 때 느려지지 않게). Contribution Analysis · Spectrum Map 은 각자 「분석 실행」으로 그 영역 입력(분석 채널 · 지도 축 등)만 반영. 세 영역은 머리의 「접기」로 접을 수 있습니다
 4. **「Order Analysis XLSX 저장」** — Settings · Order Analysis · Order RSS Sum · Order Contribution 시트
 
 예시로 해 보기: 첫 화면의 「예시 CSV 받기」(가상 값, 1,000~1,800 Hz · 2,000~2,400 RPM) → 올린 뒤 오더 입력에 `30, 36, 42` 를 넣으면 기여도까지 5개 RPM 이 모두 나옵니다.
 
 | 부분 | 하는 일 |
 |---|---|
-| 첫 화면 | 전동 지게차 옆모습(SVG — 배터리 칸 · 구동 모터 · 감속 기어박스 · 충전구, 배기관 없음) + 모터 · 기어박스 센서 둘레 소음 등고선, 가상 캠벨 선도(가로 Frequency (Hz) · 세로 RPM, 색 띠 등고선, 1 · 2 · 4 · 6차 오더 선, 공진 띠). RPM 커서가 오르내리며 가장 큰 성분을 읽어 주고 그만큼 지게차가 떨림. 「동작 줄이기」 설정이면 멈춘 그림, 화면 밖 · 탭 숨김이면 멈춤. **그림은 가상 값입니다** |
+| 첫 화면 | 지게차 두 대 — 전동식(SVG — 배터리 칸 · 구동 모터 · 감속 기어박스 · 충전구)과 엔진식(배기관 · 엔진 덮개 통풍구 · 라디에이터 그릴 · 엔진 블록), 두 센서 둘레 소음 등고선(에너지 합), 그림 높이 = 왼쪽 글 묶음 높이, 가상 캠벨 선도(가로 Frequency (Hz) · 세로 RPM, 색 띠 등고선, 1 · 2 · 4 · 6차 오더 선, 공진 띠). RPM 커서가 오르내리며 가장 큰 성분을 읽어 주고 그만큼 지게차가 떨림. 「동작 줄이기」 설정이면 멈춘 그림, 화면 밖 · 탭 숨김이면 멈춤. **그림은 가상 값입니다** |
 | CSV 파일 업로드 | 인코딩 자동(UTF-8 · CP949), 메타데이터에서 RPM · 위치 · 방향 · 소음/진동 구분, 인식 신호등 · Curve 표 |
 | Order Analysis | 채널 · 오더 · 피크 검색/합산 범위, 오더 진폭 · RSS · Overall 그래프, 단위(Amplitude · dB · dBA)와 dB 기준값 |
-| 차수별 기여도 분석 | 기여도(%) = Aᵢ² ÷ Overall² × 100, 요약 · 차트 · 표 |
+| Contribution Analysis (차수별 기여도) | 기여도(%) = Aᵢ² ÷ Overall² × 100, 요약 · 차트 · 표. 오더 2개 미만이면 안내 |
 | Spectrum Map | 주파수(또는 오더) × RPM 컬러맵, 오더 선 겹치기, 축 · 색 범위 |
 
 ## 파일
 
-- `index.html` · `js/script.js` · `css/style.css` — **제출자 분석기 v51**(원본은 `docs/source/order_analysis_v51/`, 바뀐 곳은 `script.js` 오류 수정 한 줄)
+- `index.html` · `js/script.js` · `css/style.css` — **제출자 분석기 v51**(원본은 `docs/source/order_analysis_v51/`. 바뀐 곳: `script.js` 오류 수정 한 줄(5차) + 6차 화면 연결 7곳(「분석 실행」 · 접기 · 기여도 빈 상태, 표시 `[2026-10-02 v52]` — 계산 함수는 원본 그대로), `index.html` 세 영역 머리 · 실행 줄 · Contribution Analysis 카드. `style.css` 는 원본 그대로)
+- `css/panels.css` — 6차 덧붙임(업로드 칸 높이 · 접기 · 실행 버튼 · 「입력이 바뀌었습니다」)
 - `js/hero.js` · `css/hero.css` — 첫 화면 그림 · 움직임(분석 코드와 서로 건드리지 않음)
 - `classic/` — 이전 도구(v34 · v40 기준 재구성판: `classic/index.html` · `classic/js/logic.js` · `app.js` · `sample-data.js` · `store.js` · `classic/css/style.css`). XLSX 는 `vendor/` 의 SheetJS
 - `samples/` — 가상 예시 CSV 4종 · `test/fixtures/` — 가상 고정 파일
@@ -52,6 +53,7 @@ Testlab Neo 에서 내보낸 주파수축 CSV 를 올리면 RPM 별 오더 진�
 
 - `node test/all.mjs` (의존성 없음) = `test/analyzer.test.mjs`(v51 · 첫 화면 · 오류 회귀) + `test/classic.test.mjs`(이전 도구 · v34/v40 대조)
 - 브라우저 회귀(선택): `PW_CORE=<playwright-core 경로> CHROME=<크롬> node test/browser-second-csv.mjs` — 첫 CSV 분석 → 채널 이름이 다른 둘째 CSV → 콘솔 오류 0
+- 「분석 실행」 회귀(선택): `PW_CORE=… CHROME=… BASE_ROOT=<이전 판 폴더> node test/browser-run-buttons.mjs` — 입력만으로는 다시 계산 안 함 · 실행 뒤 결과가 이전 판(입력마다 계산하던 5차)과 같음 · 접기 · 오류 0
 
 ## 문서
 

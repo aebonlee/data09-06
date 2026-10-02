@@ -1,7 +1,9 @@
 /* 첫 화면(히어로) — 지게차 그림 + 소음·진동 컨투어
  * 오른쪽: 구동 모터 회전수(RPM)를 올리며 잰 것처럼 만든 「가상」 캠벨 선도(Campbell diagram).
  *         가로 = 주파수(Hz), 세로 = RPM — 이 도구의 Spectrum Map 과 같은 방향. 비스듬한 선이 오더(N × RPM ÷ 60).
- * 왼쪽:  전동 지게차(좌석 아래 배터리 · 앞 차축 옆 구동 모터) — 모터 · 기어박스의 가속도 센서 둘레 소음 등고선(가상).
+ * 왼쪽:  지게차 두 대 — 전동식(좌석 아래 배터리 · 앞 차축 옆 구동 모터)과 엔진식(배기관 · 엔진 덮개 통풍구 · 라디에이터 그릴).
+ *         두 대의 가속도 센서(모터 · 기어박스 / 엔진 블록)를 소리 원천으로 보고 에너지를 더한 소음 등고선(가상, 엔진식이 조금 더 큼).
+ * 크기:  두 단 화면에서는 그림 높이를 왼쪽 글 묶음 높이에 맞춘다(2026-10-02 요청 — 2560×1440 에서 업로드 칸이 첫 화면에 안 보임).
  * 오더 · 공진 값은 제출자가 「임의로 지정해도 좋다」고 해서 정한 가상 값입니다(2026-09-30 답변).
  * 실제 시험값이 아니라 아래 식으로 만든 그림입니다. 분석 기능(js/script.js)과는 서로 건드리지 않습니다.
  * 순수 함수는 node 테스트에서 불러 씁니다(test/logic.test.mjs).
@@ -111,9 +113,45 @@
     return out;
   }
 
+  // 두 소리 원천(센서 두 곳)의 소음 띠: 원천마다 거리가 1.33 배 멀어질 때 한 띠(약 2.5 dB)씩 작아지고,
+  // 두 원천은 에너지로 더한다(10·log10 Σ 10^(L/10)). 반환: 띠 번호 0(가장 안쪽 · 큰 소리) … count-1, 바깥이면 -1
+  // sources: [{ x, y, gainDb }], size: 그림 영역 크기(px) — 안쪽 띠 반지름 = size × 0.085
+  var RING_STEP_DB = 20 * Math.log10(1.33);
+  function noiseBand(sources, x, y, size, count) {
+    var n = count || 8, r0 = size * 0.085, e = 0;
+    for (var i = 0; i < sources.length; i++) {
+      var s = sources[i], dx = (x - s.x) / 1.3, dy = (y - s.y) / 0.82;
+      var th = Math.atan2(dy, dx), d = Math.sqrt(dx * dx + dy * dy) / (1 + 0.07 * Math.sin(3 * th + i * 0.9) + 0.04 * Math.cos(5 * th - i * 0.7));
+      var L = -20 * Math.log10(Math.max(d, r0) / r0) + (s.gainDb || 0);
+      e += Math.pow(10, L / 10);
+    }
+    var band = Math.ceil(-10 * Math.log10(e) / RING_STEP_DB - 1e-9);
+    if (!(band > 0)) band = 0; // -0 도 0 으로
+    return band < n ? band : -1;
+  }
+
+  // 그림 영역 나누기(CSS 픽셀): 지게차 두 대 묶음(가로세로 비 720:250 유지)과 캠벨 선도 칸
+  //   넓은 그림(가로 ÷ 세로 ≥ 1.5) → 왼쪽 지게차 · 오른쪽 선도, 좁은 그림 → 위 지게차 · 아래 선도
+  var FLEET_RATIO = 720 / 250;
+  function heroLayout(W, H) {
+    var narrow = W < 520, pad = Math.max(8, Math.round(W * 0.012));
+    var right = W - (narrow ? 40 : 52), bottom = H - (narrow ? 30 : 36);
+    if (W / H >= 1.5) {
+      // 덜 넓은 그림(1280px 화면 등)에서는 지게차 몫을 조금 늘리고, 남는 위쪽 여백의 1/4 만큼 올려 가운데 쪽으로
+      var fw = Math.min(W * (W / H < 2.2 ? 0.57 : 0.5), (H - 2 * pad) * 0.86 * FLEET_RATIO), fh = fw / FLEET_RATIO;
+      var fleet = { x: pad, y: H - pad - fh - (H - 2 * pad - fh) * 0.25, w: fw, h: fh };
+      return { stacked: false, narrow: narrow, fleet: fleet, zone: { x: 0, y: 0, w: Math.round(fleet.x + fw + W * 0.012), h: H },
+        plot: { left: Math.round(fleet.x + fw + W * 0.025), right: right, top: narrow ? 10 : 14, bottom: bottom } };
+    }
+    var w2 = W - 2 * pad, h2 = Math.min(w2 / FLEET_RATIO, H * 0.42); w2 = h2 * FLEET_RATIO;
+    var fleet2 = { x: (W - w2) / 2, y: pad, w: w2, h: h2 };
+    return { stacked: true, narrow: narrow, fleet: fleet2, zone: { x: 0, y: 0, w: W, h: Math.round(fleet2.y + h2 + 6) },
+      plot: { left: pad + 2, right: right, top: Math.round(fleet2.y + h2 + 14), bottom: bottom } };
+  }
+
   function fmtInt(n) { return Math.round(n).toLocaleString('ko-KR'); }
 
-  var api = { MODEL: MODEL, STOPS: STOPS, orderFrequency: orderFrequency, resonanceGain: resonanceGain, orderAmplitude: orderAmplitude, spectrumAt: spectrumAt, toDb: toDb, levelOf: levelOf, colorAt: colorAt, dominantOrder: dominantOrder, sweepRpm: sweepRpm, noiseRings: noiseRings };
+  var api = { MODEL: MODEL, STOPS: STOPS, orderFrequency: orderFrequency, resonanceGain: resonanceGain, orderAmplitude: orderAmplitude, spectrumAt: spectrumAt, toDb: toDb, levelOf: levelOf, colorAt: colorAt, dominantOrder: dominantOrder, sweepRpm: sweepRpm, noiseRings: noiseRings, noiseBand: noiseBand, heroLayout: heroLayout, FLEET_RATIO: FLEET_RATIO };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.HeroContour = api;
 
@@ -126,9 +164,14 @@
     if (!wrap || !canvas || !canvas.getContext) return;
     var ctx = canvas.getContext('2d');
     var forklift = document.getElementById('heroForklift');
+    var fleet = document.getElementById('heroFleet');
     var body = document.getElementById('heroForkliftBody');
-    var sensor = document.getElementById('heroSensor');
+    var bodyEngine = document.getElementById('heroEngineBody');
+    var sensors = [document.getElementById('heroSensor'), document.getElementById('heroSensorEngine')];
     var ripples = document.querySelectorAll('#heroForklift .hero-ripple');
+    var smokes = document.querySelectorAll('#heroForklift .hero-smoke');
+    var copy = document.querySelector('.hero-copy');
+    var heroInner = document.querySelector('.hero-inner');
     var readout = document.getElementById('heroReadout');
     var reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
@@ -136,16 +179,25 @@
     var geo = null, W = 0, H = 0, dpr = 1;
     var visible = true, raf = 0, last = 0, phase = 0.18, lastDraw = 0;
 
-    // 오른쪽 그래프 영역(캔버스 CSS 픽셀)
+    // 두 단(글 | 그림)일 때 그림 높이 = 왼쪽 글 묶음 높이(최소 240px). 한 단이면 CSS 의 가로세로 비를 쓴다
+    function fitHeight() {
+      var twoCol = heroInner && getComputedStyle(heroInner).gridTemplateColumns.split(' ').length > 1;
+      var want = twoCol && copy ? Math.max(240, Math.round(copy.getBoundingClientRect().height)) + 'px' : '';
+      if (wrap.style.height !== want) wrap.style.height = want;
+    }
+
+    // 지게차 묶음 자리 · 오른쪽(또는 아래) 그래프 영역(캔버스 CSS 픽셀)
     function layout() {
+      fitHeight();
       var r = wrap.getBoundingClientRect();
       W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
       dpr = Math.min(2, window.devicePixelRatio || 1);
-      var narrow = W < 520;
-      var left = Math.round(W * (narrow ? 0.40 : 0.42));
-      var right = W - (narrow ? 40 : 52);
-      var top = narrow ? 10 : 14, bottom = H - (narrow ? 30 : 36);
-      geo = { left: left, right: right, top: top, bottom: bottom, narrow: narrow };
+      var L = heroLayout(W, H);
+      geo = { left: L.plot.left, right: L.plot.right, top: L.plot.top, bottom: L.plot.bottom, narrow: L.narrow, zone: L.zone };
+      if (fleet) {
+        fleet.style.left = L.fleet.x.toFixed(1) + 'px'; fleet.style.top = L.fleet.y.toFixed(1) + 'px';
+        fleet.style.bottom = 'auto'; fleet.style.width = L.fleet.w.toFixed(1) + 'px'; fleet.style.height = L.fleet.h.toFixed(1) + 'px';
+      }
       canvas.width = W * dpr; canvas.height = H * dpr;
       canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
       base.width = W * dpr; base.height = H * dpr;
@@ -155,11 +207,15 @@
     function xOfF(f) { return geo.left + (f - MODEL.fMin) / (MODEL.fMax - MODEL.fMin) * (geo.right - geo.left); }
     function yOfRpm(r) { return geo.bottom - (r - MODEL.rpmMin) / (MODEL.rpmMax - MODEL.rpmMin) * (geo.bottom - geo.top); }
 
-    // 센서 위치(캔버스 좌표) — SVG 의 센서 점에서 읽는다
-    function sensorPoint() {
-      if (!sensor) return { x: W * 0.3, y: H * 0.62 };
-      var a = sensor.getBoundingClientRect(), c = canvas.getBoundingClientRect();
-      return { x: a.left + a.width / 2 - c.left, y: a.top + a.height / 2 - c.top };
+    // 센서 위치(캔버스 좌표) — SVG 의 센서 점에서 읽는다. 엔진식이 조금 더 시끄럽다고 둠(+2.5 dB, 가상)
+    function sensorPoints() {
+      var c = canvas.getBoundingClientRect(), out = [];
+      sensors.forEach(function (s, i) {
+        if (!s) return;
+        var a = s.getBoundingClientRect();
+        out.push({ x: a.left + a.width / 2 - c.left, y: a.top + a.height / 2 - c.top, gainDb: i === 1 ? 2.5 : 0 });
+      });
+      return out.length ? out : [{ x: W * 0.3, y: H * 0.62, gainDb: 0 }];
     }
 
     function renderBase() {
@@ -168,26 +224,25 @@
       b.setTransform(1, 0, 0, 1, 0, 0);
       b.clearRect(0, 0, base.width, base.height);
 
-      // ① 왼쪽: 구동 모터 · 기어박스 둘레 소음 등고선(가상) — 센서에서 멀어질수록 한 띠씩 작아지는 음압(바깥 띠부터 겹쳐 그림)
-      var sp = sensorPoint();
-      b.setTransform(dpr, 0, 0, dpr, 0, 0);
-      b.save();
-      b.beginPath(); b.rect(0, 0, geo.left - 2, H); b.clip();
-      var rings = noiseRings(Math.min(W, H * 1.9));
-      for (var ri = rings.length - 1; ri >= 0; ri--) {
-        var g = rings[ri], c = colorAt(g.t);
-        b.beginPath();
-        for (var s2 = 0; s2 <= 96; s2++) {
-          var th = s2 / 96 * Math.PI * 2, rr = g.r * (1 + 0.07 * Math.sin(3 * th + ri * 0.9) + 0.04 * Math.cos(5 * th - ri * 0.7));
-          var px = sp.x + Math.cos(th) * rr * 1.3, py = sp.y + Math.sin(th) * rr * 0.82;
-          if (s2) b.lineTo(px, py); else b.moveTo(px, py);
-        }
-        b.closePath();
-        b.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + g.fill + ')'; b.fill();
-        b.lineWidth = 1; b.strokeStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + g.stroke + ')'; b.stroke();
+      // ① 지게차 쪽: 두 센서(구동 모터 · 기어박스 / 엔진 블록) 둘레 소음 등고선(가상) — 멀어질수록 한 띠씩 작아지는 음압, 두 원천은 에너지로 더함
+      var sp = sensorPoints(), z = geo.zone, rings = noiseRings(1);
+      var zw = Math.max(1, Math.round(z.w * dpr)), zh = Math.max(1, Math.round(z.h * dpr));
+      var size = Math.min(z.w * 0.62, z.h * 1.9);
+      // 예전 그림처럼 바깥 띠부터 반투명하게 겹친 효과: 띠 i 의 불투명도 = 1 − Π(j ≥ i)(1 − fill_j)
+      var acc = [], keep = 1;
+      for (var ai = rings.length - 1; ai >= 0; ai--) { keep *= 1 - rings[ai].fill; acc[ai] = 1 - keep; }
+      var bands = new Int8Array(zw * zh);
+      for (var by = 0; by < zh; by++) for (var bx = 0; bx < zw; bx++) bands[by * zw + bx] = noiseBand(sp, (bx + 0.5) / dpr + z.x, (by + 0.5) / dpr + z.y, size, rings.length);
+      var img1 = b.createImageData(zw, zh), d1 = img1.data;
+      for (var qy = 0; qy < zh; qy++) for (var qx = 0; qx < zw; qx++) {
+        var qi = qy * zw + qx, bd = bands[qi];
+        if (bd < 0) continue;
+        var edge = (qx + 1 < zw && bands[qi + 1] !== bd) || (qy + 1 < zh && bands[qi + zw] !== bd) || (qx > 0 && bands[qi - 1] !== bd) || (qy > 0 && bands[qi - zw] !== bd);
+        var rg = rings[bd], col = colorAt(rg.t), k1 = qi * 4;
+        var dk = edge ? 0.78 : 1;
+        d1[k1] = col[0] * dk; d1[k1 + 1] = col[1] * dk; d1[k1 + 2] = col[2] * dk; d1[k1 + 3] = Math.round(255 * (edge ? Math.max(rg.stroke, acc[bd]) : acc[bd]));
       }
-      b.restore();
-      b.setTransform(1, 0, 0, 1, 0, 0);
+      b.putImageData(img1, Math.round(z.x * dpr), Math.round(z.y * dpr));
 
       // ② 오른쪽: 캠벨 선도(가상)
       var img2 = b.createImageData(pw, ph), d2 = img2.data;
@@ -295,14 +350,24 @@
       if (readout && dom) readout.textContent = 'RPM ' + fmtInt(rpm) + ' · 가장 큰 성분 ' + dom.k + '차 ' + dom.f.toFixed(1) + ' Hz';
       // 지게차 떨림 · 센서 물결 — 지금 RPM 의 가장 큰 오더 진폭에 비례
       var amp = dom ? Math.min(1, dom.a / 3.2) : 0;
-      if (body && !reduce.matches) {
+      if (!reduce.matches) {
         var t = performance.now() / 1000, j = amp * 0.9;
-        body.setAttribute('transform', 'translate(' + (Math.sin(t * 61) * j).toFixed(2) + ' ' + (Math.cos(t * 47) * j * 0.8).toFixed(2) + ')');
+        if (body) body.setAttribute('transform', 'translate(' + (Math.sin(t * 61) * j).toFixed(2) + ' ' + (Math.cos(t * 47) * j * 0.8).toFixed(2) + ')');
+        // 엔진식은 공회전 떨림이 조금 더 있다고 둠
+        var je = 0.25 + amp * 1.1;
+        if (bodyEngine) bodyEngine.setAttribute('transform', 'translate(' + (Math.sin(t * 53 + 1) * je).toFixed(2) + ' ' + (Math.cos(t * 71) * je * 0.8).toFixed(2) + ')');
       }
+      // 센서 물결: 센서마다 3겹(앞 3개 = 전동식, 뒤 3개 = 엔진식)
       for (var i = 0; i < ripples.length; i++) {
-        var p = reduce.matches ? (i + 1) / (ripples.length + 1) : ((performance.now() / 1400) + i / ripples.length) % 1;
+        var p = reduce.matches ? (i % 3 + 1) / 4 : ((performance.now() / 1400) + (i % 3) / 3 + (i >= 3 ? 0.17 : 0)) % 1;
         ripples[i].setAttribute('r', (5 + p * (14 + amp * 16)).toFixed(1));
         ripples[i].setAttribute('opacity', ((1 - p) * (0.35 + 0.6 * amp)).toFixed(2));
+      }
+      // 배기 연기: 위로 오르며 커지고 옅어짐(움직임 줄이기면 그대로)
+      if (!reduce.matches) for (var si = 0; si < smokes.length; si++) {
+        var ps = ((performance.now() / 2400) + si / smokes.length) % 1;
+        smokes[si].setAttribute('cx', (288 + ps * 30).toFixed(1)); smokes[si].setAttribute('cy', (30 - ps * 26).toFixed(1));
+        smokes[si].setAttribute('r', (4 + ps * 7).toFixed(1)); smokes[si].setAttribute('opacity', ((1 - ps) * 0.5).toFixed(2));
       }
     }
 
@@ -324,7 +389,8 @@
     if (window.ResizeObserver) new ResizeObserver(onResize).observe(wrap); else window.addEventListener('resize', onResize);
     document.addEventListener('visibilitychange', function () { if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = 0; } else kick(); });
     if (window.IntersectionObserver) new IntersectionObserver(function (es) { visible = es[0].isIntersecting; if (visible) kick(); }, { threshold: 0.05 }).observe(wrap);
-    var onMotion = function () { if (reduce.matches) { if (raf) cancelAnimationFrame(raf); raf = 0; if (body) body.removeAttribute('transform'); drawStill(); } else kick(); };
+    if (window.ResizeObserver && copy) new ResizeObserver(onResize).observe(copy);
+    var onMotion = function () { if (reduce.matches) { if (raf) cancelAnimationFrame(raf); raf = 0; if (body) body.removeAttribute('transform'); if (bodyEngine) bodyEngine.removeAttribute('transform'); drawStill(); } else kick(); };
     if (reduce.addEventListener) reduce.addEventListener('change', onMotion); else if (reduce.addListener) reduce.addListener(onMotion);
     kick();
 

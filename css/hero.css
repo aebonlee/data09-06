@@ -38,7 +38,8 @@ body.dark-mode {
   display: grid;
   grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
   gap: clamp(18px, 2.4vw, 44px);
-  align-items: center;
+  /* 그림 높이를 글 묶음에 맞추므로 위끝을 맞춘다(가운데 맞춤이면 그림 아래 설명 줄 때문에 글이 내려감) */
+  align-items: start;
 }
 /* 머리글 .inner 와 같은 폭 규칙(학생 css/style.css) */
 header .hero-inner { width: var(--content-width, min(96vw, 2200px)); max-width: none; margin: 0 auto; }
@@ -127,21 +128,47 @@ header .hero-inner { width: var(--content-width, min(96vw, 2200px)); max-width: 
   width: 100%;
   aspect-ratio: 16 / 9;
   min-height: 210px;
+  /* 두 단 화면에서는 js/hero.js 가 높이를 왼쪽 글 묶음 높이에 맞춘다(2026-10-02 요청 — 그림이 너무 커서 업로드 칸이 안 보임) */
   border-radius: 12px;
   overflow: hidden;
   background: radial-gradient(120% 90% at 20% 80%, rgba(21, 89, 133, 0.55), rgba(4, 16, 29, 0.55));
   border: 1px solid var(--hero-line);
 }
 .hero-visual canvas { position: absolute; inset: 0; display: block; }
-.hero-forklift {
+/* 지게차 두 대(전동식 · 엔진식) 묶음 — 자리와 크기는 js/hero.js 가 그림 영역에 맞춰 정한다(아래 값은 스크립트가 없을 때) */
+.hero-fleet {
   position: absolute;
   left: 1.5%;
   bottom: 5%;
-  width: 43%;
-  height: auto;
+  width: 50%;
+  aspect-ratio: 720 / 250;
+}
+.hero-forklift {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   overflow: visible;
   filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
 }
+/* 「전동식」「엔진식」 이름표 — 오버헤드 가드 위(그림 좌표 205 · 585 / 720) */
+.hero-fleet-label {
+  position: absolute;
+  top: 2%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(8, 20, 36, 0.82);
+  border: 1px solid var(--hero-line);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hero-fleet-label-electric { left: 28.5%; }
+.hero-fleet-label-engine { left: 81.3%; }
 .hero-caption {
   display: flex;
   flex-wrap: wrap;
@@ -165,9 +192,13 @@ header .hero-inner { width: var(--content-width, min(96vw, 2200px)); max-width: 
   .hero-inner { grid-template-columns: minmax(0, 1fr); }
   .hero-title br { display: none; }
 }
-@media (max-width: 700px) {
-  .hero-visual { aspect-ratio: 4 / 3; }
-  .hero-forklift { width: 44%; bottom: 7%; }
+@media (max-width: 900px) {
+  .hero-visual { aspect-ratio: 2.4 / 1; }
+}
+@media (max-width: 600px) {
+  /* 좁은 화면: 지게차 두 대를 위에, 캠벨 선도를 아래에 */
+  .hero-visual { aspect-ratio: 1 / 0.95; }
+  .hero-fleet-label { font-size: 11px; padding: 1px 6px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-btn { transition: none; }

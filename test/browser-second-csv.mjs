@@ -25,6 +25,7 @@ await page.waitForTimeout(800);
 await page.fill('#multiOrderInput', '30, 36, 42');
 await page.dispatchEvent('#multiOrderInput', 'input');
 await page.click('#selectAllChannels');
+await page.click('#runOrderAnalysis'); // 2026-10-02 v52: 입력은 「분석 실행」 때 반영
 await page.waitForTimeout(500);
 const s1 = await page.evaluate(() => document.getElementById('multiKpis').innerText.replace(/\s+/g, ' '));
 console.log('1st KPI:', s1.slice(0, 160));
@@ -35,6 +36,7 @@ await page.waitForTimeout(600);
 await page.click('#confirmCsvAnalysis');
 await page.waitForTimeout(800);
 await page.click('#selectAllChannels');
+await page.click('#runOrderAnalysis');
 await page.waitForTimeout(500);
 const s2 = await page.evaluate(() => ({ kpi: document.getElementById('multiKpis').innerText.replace(/\s+/g, ' '), ch: [...document.querySelectorAll('.multi-channel')].map(x => x.value) }));
 console.log('2nd KPI:', s2.kpi.slice(0, 160));
